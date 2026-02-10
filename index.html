@@ -4,51 +4,127 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Speech recognition app</title>
-  <style>
-    body {
-  background: #f6ecf6;
-  margin: 0;
-  font-family: sans-serif;
-  overflow-x: hidden;     /* prevent horizontal scroll */
-  overflow-y: auto;       /* allow vertical scroll */
-}
+<style>
+  body{
+    background:#f6ecf6;
+    margin:0;
+    font-family:sans-serif;
+    overflow-x:hidden;   /* prevent horizontal scroll */
+    overflow-y:auto;     /* allow vertical scroll */
+  }
 
-    .main-container{
-      display:flex; flex-direction:column; justify-content:center; align-items:center;
-      min-height:100vh; padding:20px; box-sizing:border-box; gap:12px;
-    }
-    .top-row{
-      display:flex; width:100%; max-width:700px; gap:10px; align-items:center; flex-wrap:wrap;
-    }
-    .button-container { display:flex; gap:10px; flex:1; min-width:300px; flex-wrap:wrap; }
+  .main-container{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    min-height:100vh;
+    padding:16px;
+    box-sizing:border-box;
+    gap:12px;
+  }
 
-    button, select{
-      background:#5f4e4f; color:#fff; font-size:16px; padding:10px 16px;
-      border:0; border-radius:5px; cursor:pointer;
-    }
-    button:disabled{ opacity:.55; cursor:not-allowed; }
-    select{ background:#fff; color:#5f4e4f; border:2px solid #5f4e4f; }
-    #text{
-      border:2px #5f4e4f solid; border-radius:5px; overflow:auto;
-      width:90%; max-width:700px; flex-grow:1; box-sizing:border-box;
-      resize:vertical; font-size:16px; padding:10px;
-    }
-    .status{ width:100%; max-width:700px; color:#5f4e4f; font-size:14px; min-height:18px; user-select:none; }
-    .note{ width:100%; max-width:700px; color:#5f4e4f; font-size:13px; line-height:1.35; }
-    .note code{ background:rgba(95,78,79,.08); padding:1px 4px; border-radius:4px; }
-  </style>
+  /* Keep all main blocks perfectly aligned */
+  .lang-row,
+  .controls,
+  .status,
+  #text{
+    width:100%;
+    max-width:700px;
+    box-sizing:border-box;
+  }
+
+  /* Language selector full width like the textbox */
+  .lang-row select{
+    width:100%;
+    background:#fff;
+    color:#5f4e4f;
+    border:2px solid #5f4e4f;
+    border-radius:5px;
+    padding:10px 12px;
+    font-size:16px;
+  }
+
+  /* Controls layout: 3 rows (2 buttons / 1 button / 2 buttons) */
+  .controls{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .btn-row{
+    display:grid;
+    gap:10px;
+  }
+  .btn-row.two{ grid-template-columns:1fr 1fr; }
+  .btn-row.one{ grid-template-columns:1fr; }
+
+  button{
+    width:100%;
+    background:#5f4e4f;
+    color:#fff;
+    font-size:16px;
+    padding:10px 12px;
+    border:0;
+    border-radius:5px;
+    cursor:pointer;
+  }
+  button:disabled{
+    opacity:.55;
+    cursor:not-allowed;
+  }
+
+  #text{
+    border:2px solid #5f4e4f;
+    border-radius:5px;
+    overflow:auto;
+    resize:vertical;
+    font-size:16px;
+    padding:10px;
+    min-height:40vh;
+  }
+
+  .status{
+    color:#5f4e4f;
+    font-size:14px;
+    min-height:18px;
+    user-select:none;
+  }
+
+  /* Optional small-screen tuning */
+  @media (max-width:480px){
+    .main-container{ padding:12px; }
+    button{ font-size:15px; padding:10px 10px; }
+  }
+</style>
 </head>
 
 <body>
   <div class="main-container">
-    <div class="top-row">
-      <div class="button-container">
+        <!-- Language full-width row -->
+    <div class="lang-row">
+      <select id="langSelect" aria-label="Language">
+        <option value="fr-FR" selected>Français</option>
+        <option value="en-US">English</option>
+      </select>
+    </div>
+
+    <!-- Buttons full-width, in 3 rows -->
+    <div class="controls">
+      <div class="btn-row two">
         <button id="btnStartNew">START</button>
         <button id="btnStop" disabled>STOP</button>
-        <button id="btnPlay">PLAY</button>
-        <button id="btnPause">PAUSE</button>
-        <button id="btnResume" disabled>RESUME</button>   
       </div>
+
+      <div class="btn-row one">
+        <button id="btnPlay">PLAY</button>
+      </div>
+
+      <div class="btn-row two">
+        <button id="btnPause">PAUSE</button>
+        <button id="btnResume" disabled>RESUME</button>
+      </div>
+    </div>
+
 
       <label style="display:flex;align-items:center;gap:8px;">
         <span style="color:#5f4e4f;font-weight:600;"></span>
