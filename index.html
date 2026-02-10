@@ -101,6 +101,46 @@
     .main-container{ padding:12px; }
     button{ font-size:15px; padding:10px 10px; }
   }
+
+  .text-wrap{
+  position: relative;
+  width: 100%;
+  max-width: 700px;
+  box-sizing: border-box;
+}
+
+/* Keep your textarea full-width inside wrapper */
+.text-wrap #text{
+  width: 100%;
+}
+
+/* Small unobtrusive edit button */
+.icon-btn{
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  border: 0;
+  background: rgba(95,78,79,0.14);
+  color: #5f4e4f;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+/* On tap/hover: slightly stronger */
+.icon-btn:hover{ background: rgba(95,78,79,0.22); }
+.icon-btn:active{ transform: scale(0.98); }
+
+/* When in edit mode, make button look "active" */
+.icon-btn.is-on{
+  background: #5f4e4f;
+  color: #fff;
+}
+
 </style>
 </head>
 
@@ -132,7 +172,11 @@
     </div>
     <div class="status" id="status"></div>
 
-    <textarea id="text" cols="30" rows="10" placeholder="Your text will appear here..."></textarea>
+    <div class="text-wrap">
+      <button id="btnEdit" class="icon-btn" type="button" aria-label="Edit text" title="Edit">✎</button>
+      <textarea id="text" readonly cols="30" rows="10" placeholder="Your text will appear here..."></textarea>
+    </div>
+
   </div>
 
   <script>
@@ -146,6 +190,26 @@
     const statusEl    = document.getElementById("status");
 
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    const btnEdit = document.getElementById("btnEdit");
+    let isEditMode = false;
+
+    btnEdit.addEventListener("click", () => {
+      isEditMode = !isEditMode;
+    
+      if (isEditMode) {
+        text.removeAttribute("readonly");
+        btnEdit.classList.add("is-on");
+        btnEdit.textContent = "✓";
+        text.focus();           // keyboard opens intentionally
+      } else {
+        text.setAttribute("readonly", "");
+        btnEdit.classList.remove("is-on");
+        btnEdit.textContent = "✎";
+        text.blur();            // hide keyboard
+      }
+    });
+
 
     let recognition = null;
 
@@ -369,6 +433,11 @@ recognition.onresult = (event) => {
 
 
     function resume(){
+      text.setAttribute("readonly", "");
+      isEditMode = false;
+      btnEdit.classList.remove("is-on");
+      btnEdit.textContent = "✎";
+      text.blur();
       if (!ensureRecognition() || !sessionActive) return;
 
       // ✅ Keep user edits (in case they edited while paused)
