@@ -442,23 +442,32 @@ recognition.onresult = (event) => {
 
     function pause(){
       if (!recognition || !sessionActive) return;
-
+    
       // ✅ Keep user edits: make the textarea the source of truth
       finalText = text.value || "";
       if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
-
+    
       // (recommended) reset dedupe state after manual edits
       lastFinal = "";
       lastFinalAt = 0;
-
+    
       isPaused = true;
       keepAlive = false;
-
+    
+      // ✅ Auto-enter edit mode BEFORE stopping recognition (more stable on mobile)
+      text.removeAttribute("readonly");
+      isEditMode = true;
+      btnEdit.classList.add("is-on");
+      editState.textContent = "ON";
+      // prevent scroll jump in some browsers (optional):
+      text.focus({ preventScroll: true });
+    
       setStatus("Paused.");
       updateUI({listening:false, paused:true});
-
+    
       try { recognition.stop(); } catch(e) { console.log(e); }
     }
+
 
 
     function resume(){
