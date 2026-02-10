@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speech recognition app</title>
+  <style>
+    body { background:#f6ecf6; overflow:hidden; margin:0; font-family:sans-serif; }
+    .main-container{
+      display:flex; flex-direction:column; justify-content:center; align-items:center;
+      min-height:100vh; padding:20px; box-sizing:border-box; gap:12px;
+    }
+    .top-row{
+      display:flex; width:90%; max-width:700px; gap:10px; align-items:center; flex-wrap:wrap;
+    }
+    .button-container{ display:flex; gap:10px; flex:1; min-width:320px; flex-wrap:wrap; }
+    button, select{
+      background:#5f4e4f; color:#fff; font-size:16px; padding:10px 16px;
+      border:0; border-radius:5px; cursor:pointer;
+    }
+    button:disabled{ opacity:.55; cursor:not-allowed; }
+    select{ background:#fff; color:#5f4e4f; border:2px solid #5f4e4f; }
+    #text{
+      border:2px #5f4e4f solid; border-radius:5px; overflow:auto;
+      width:90%; max-width:700px; flex-grow:1; box-sizing:border-box;
+      resize:vertical; font-size:16px; padding:10px;
+    }
+    .status{ width:90%; max-width:700px; color:#5f4e4f; font-size:14px; min-height:18px; user-select:none; }
+    .note{ width:90%; max-width:700px; color:#5f4e4f; font-size:13px; line-height:1.35; }
+    .note code{ background:rgba(95,78,79,.08); padding:1px 4px; border-radius:4px; }
+  </style>
+</head>
+
+<body>
+  <div class="main-container">
+    <div class="top-row">
+      <div class="button-container">
+        <button id="btnStartNew">START</button>
+        <button id="btnPause">PAUSE</button>
+        <button id="btnResume" disabled>RESUME</button>
+        <button id="btnStop" disabled>STOP</button>
+        <button id="btnPlay">PLAY</button>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;">
+        <span style="color:#5f4e4f;font-weight:600;"></span>
+        <select id="langSelect" aria-label="">
+          <option value="fr-FR" selected>Français</option>
+          <option value="en-US">English</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <textarea id="text" cols="30" rows="10" placeholder="Your text will appear here..."></textarea>
+  </div>
+
+  <script>
+    const btnStartNew = document.getElementById("btnStartNew");
+    const btnPause    = document.getElementById("btnPause");
+    const btnResume   = document.getElementById("btnResume");
+    const btnStop     = document.getElementById("btnStop");
+    const btnPlay     = document.getElementById("btnPlay");
+    const langSelect  = document.getElementById("langSelect");
+    const text        = document.getElementById("text");
+    const statusEl    = document.getElementById("status");
+
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    let recognition = null;
+
+    // state
+    let sessionActive = false;     // started at least once, until STOP
+    let isPaused = false;
+    let keepAlive = false;         // auto-restart to allow long sessions
+    let lastResultIndex = 0;
+    let shouldCapitalizeNext = true;
+    let pendingResume = false;
+    let finalText = "";
+    let lastFinal = "";
+    let lastFinalAt = 0;
+
+
+
+    function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+    function updateUI({listening=false, paused=false} = {}) {
+      // START (new) is always available (it clears text)
+      btnStartNew.disabled = false;
+
+      // PAUSE available only while listening
+      btnPause.disabled = !listening;
+
+      // RESUME available only while paused
+      btnResume.disabled = !paused;
+
+      // STOP available while session active (listening or paused)
+      btnStop.disabled = !sessionActive;
+
+      // PLAY always available
+      btnPlay.disabled = false;
+    }
+
+    function buildRecognition(){
+      recognition = new SpeechRecognitionCtor();
+      recognition.lang = langSelect.value;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onstart = () => {
+        setStatus("Listening…");
+        updateUI({listening:true, paused:false});
+      };
+
+recognition.onresult = (event) => {
+  let interim = "";
+
+  // Normalize for matching: lowercase + collapse whitespace
+  const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Return how many chars of `bNorm` overlap with the end of `aNorm`
+  const overlapLen = (aNorm, bNorm) => {
+    const max = Math.min(aNorm.length, bNorm.length);
+    for (let k = max; k > 0; k--) {
+      if (aNorm.slice(-k) === bNorm.slice(0, k)) return k;
+    }
+    return 0;
+  };
+
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const result = event.results[i];
+    const transcript = result[0].transcript || "";
+
+    if (!result.isFinal) {
+      interim += transcript;
+      continue;
+    }
+
+    const now = Date.now();
+    const tNorm = norm(transcript);
+
+    // 1) Quick exact-repeat guard
+    if (tNorm && tNorm === lastFinal && (now - lastFinalAt) < 2000) {
+      continue;
+    }
+    lastFinal = tNorm;
+    lastFinalAt = now;
+
+    // 2) Overlap-safe append (prevents duplicates on mobile Edge)
+    const ftNorm = norm(finalText);
+
+    if (!tNorm) continue;
+
+    // If the new transcript is entirely already contained at the end, skip
+    if (ftNorm.endsWith(tNorm)) continue;
+
+    // If the new transcript fully contains what we already have, replace with the new one
+    // (some engines resend a "corrected" full chunk)
+    if (tNorm.includes(ftNorm) && ftNorm.length > 0 && tNorm.length >= ftNorm.length) {
+      finalText = transcript;
+      if (!/[ \n]$/.test(finalText)) finalText += " ";
+      continue;
+    }
+
+    // Append only the non-overlapping tail
+    const k = overlapLen(ftNorm, tNorm);
+    if (k > 0) {
+      // We need to cut the ORIGINAL transcript in a way that corresponds to k normalized chars.
+      // Do a best-effort: rebuild the tail by scanning original transcript tokens.
+      const tokens = transcript.split(/\s+/);
+      let builtNorm = "";
+      let cutIndex = 0;
+
+      for (let ti = 0; ti < tokens.length; ti++) {
+        const nextNorm = norm((builtNorm ? builtNorm + " " : "") + tokens[ti]);
+        if (nextNorm.length >= k) {
+          cutIndex = ti; // overlap ends inside/at this token
+          break;
+        }
+        builtNorm = (builtNorm ? builtNorm + " " : "") + tokens[ti];
+      }
+
+      // Tail starts after the overlap tokens (safe, may drop a tiny bit rather than duplicate)
+      const tail = tokens.slice(cutIndex + 1).join(" ").trim();
+      if (tail) {
+        finalText += (finalText && !/[ \n]$/.test(finalText) ? " " : "") + tail;
+        if (!/[ \n]$/.test(finalText)) finalText += " ";
+      }
+      continue;
+    }
+
+    // Fallback: no detectable overlap — append normally
+    finalText += transcript;
+    if (!/[ \n]$/.test(finalText)) finalText += " ";
+  }
+
+  text.value = finalText + interim;
+};
+
+
+
+      recognition.onerror = (event) => {
+        console.log("Speech recognition error:", event.error);
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          keepAlive = false;
+          sessionActive = false;
+          isPaused = false;
+          setStatus("Microphone permission denied.");
+          updateUI({listening:false, paused:false});
+        } else if (!isPaused && keepAlive) {
+          setStatus("Recognition error. Reconnecting…");
+        }
+      };
+
+      recognition.onend = () => {
+        if (pendingResume && sessionActive && !isPaused) {
+          pendingResume = false;
+          try { recognition.start(); } catch (e) {
+            setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
+          }
+          return;
+        }
+        // If paused or stopped, don't restart
+        if (!sessionActive || isPaused) {
+          setStatus(isPaused ? "Paused." : "Stopped.");
+          updateUI({listening:false, paused:isPaused});
+          return;
+        }
+
+        // Keep-alive for long sessions
+        if (keepAlive) {
+          setStatus("Reconnecting…");
+          try {
+            recognition.start();
+          } catch (e) {
+            setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
+          }
+        }
+      };
+    }
+
+    function ensureRecognition(){
+      if (!SpeechRecognitionCtor) return false;
+      if (!recognition) buildRecognition();
+      recognition.lang = langSelect.value;
+      return true;
+    }
+
+    function startNew(){
+      if (!ensureRecognition()) return;
+
+      // New recording: clear text
+      finalText = "";
+      text.value = "";
+      lastResultIndex = 0;
+      shouldCapitalizeNext = true;
+
+      sessionActive = true;
+      isPaused = false;
+      keepAlive = true;
+
+      setStatus("Listening…");
+      updateUI({listening:true, paused:false});
+
+      try { recognition.start(); } catch(e) { console.log(e); }
+    }
+
+    function pause(){
+      if (!recognition || !sessionActive) return;
+
+      // ✅ Keep user edits: make the textarea the source of truth
+      finalText = text.value || "";
+      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
+
+      // (recommended) reset dedupe state after manual edits
+      lastFinal = "";
+      lastFinalAt = 0;
+
+      isPaused = true;
+      keepAlive = false;
+
+      setStatus("Paused.");
+      updateUI({listening:false, paused:true});
+
+      try { recognition.stop(); } catch(e) { console.log(e); }
+    }
+
+
+    function resume(){
+      if (!ensureRecognition() || !sessionActive) return;
+
+      // ✅ Keep user edits (in case they edited while paused)
+      finalText = text.value || "";
+      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
+
+      // (recommended) reset dedupe state after manual edits
+      lastFinal = "";
+      lastFinalAt = 0;
+
+      isPaused = false;
+      keepAlive = true;
+      pendingResume = false; // not used in your current resume logic
+
+      setStatus("Listening…");
+      updateUI({listening:true, paused:false});
+
+      // Prevent "first phrase lost" by restarting a moment later
+      lastResultIndex = 0;
+
+      setTimeout(() => {
+        try { recognition.start(); }
+        catch (e) {
+          // If it complains it's still stopping, retry once shortly after
+          setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
+        }
+      }, 200);
+    }
+
+
+
+
+    function stop(){
+      if (!recognition) return;
+
+      sessionActive = false;
+      isPaused = false;
+      keepAlive = false;
+
+      setStatus("Stopped.");
+      updateUI({listening:false, paused:false});
+
+      try { recognition.abort(); } catch(e) { console.log(e); }
+    }
+
+    btnStartNew.addEventListener("click", startNew);
+    btnPause.addEventListener("click", pause);
+    btnResume.addEventListener("click", resume);
+    btnStop.addEventListener("click", stop);
+
+    langSelect.addEventListener("change", () => {
+      if (recognition) recognition.lang = langSelect.value;
+
+      // If currently listening, restart quickly to apply language
+      if (sessionActive && !isPaused) {
+        keepAlive = false;
+        try { recognition.stop(); } catch(_) {}
+        setTimeout(() => {
+          if (!sessionActive || isPaused) return;
+          keepAlive = true;
+          try { recognition.start(); } catch(_) {}
+        }, 350);
+      }
+    });
+
+    btnPlay.addEventListener("click", () => {
+      readText(text.value);
+    });
+
+    function readText(content){
+      if (!content.trim()) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(content);
+      utter.lang = langSelect.value;
+      utter.volume = 1;
+      utter.rate = 1;
+      utter.pitch = 1;
+      window.speechSynthesis.speak(utter);
+    }
+
+
+    // Initialize UI
+    if (!SpeechRecognitionCtor) {
+      setStatus("SpeechRecognition not supported in this browser (try Chrome).");
+      btnStartNew.disabled = true;
+      btnPause.disabled = true;
+      btnResume.disabled = true;
+      btnStop.disabled = true;
+    } else {
+      setStatus("Ready.");
+      updateUI({listening:false, paused:false});
+    }
+  </script>
+</body>
+</html>
