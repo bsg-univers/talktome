@@ -428,15 +428,25 @@ recognition.onresult = (event) => {
       }
     });
 
-    btnPlay.addEventListener("click", () => {
-      // Toggle play/stop
-      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-        window.speechSynthesis.cancel();
-        btnPlay.textContent = "PLAY";
-        return;
-      }
-      readText(text.value);
-    });
+btnPlay.addEventListener("click", () => {
+  // Toggle stop if currently speaking
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+    window.speechSynthesis.cancel();
+    btnPlay.textContent = "PLAY";
+    return;
+  }
+
+  // Play selection if any, otherwise play all
+  const start = text.selectionStart ?? 0;
+  const end   = text.selectionEnd ?? 0;
+
+  const selected = (start !== end) ? text.value.slice(start, end) : "";
+  const toSpeak = selected.trim() ? selected : text.value;
+
+  readText(toSpeak);
+});
+
+
 
 function readText(content){
   const value = (content || "").trim();
