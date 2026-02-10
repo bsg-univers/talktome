@@ -5,15 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Speech recognition app</title>
   <style>
-    body { background:#f6ecf6; overflow:hidden; margin:0; font-family:sans-serif; }
+    body {
+  background: #f6ecf6;
+  margin: 0;
+  font-family: sans-serif;
+  overflow-x: hidden;     /* prevent horizontal scroll */
+  overflow-y: hidden;       /* allow vertical scroll */
+}
+
     .main-container{
       display:flex; flex-direction:column; justify-content:center; align-items:center;
       min-height:100vh; padding:20px; box-sizing:border-box; gap:12px;
     }
     .top-row{
-      display:flex; width:90%; max-width:700px; gap:10px; align-items:center; flex-wrap:wrap;
+      display:flex; width:100%; max-width:700px; gap:10px; align-items:center; flex-wrap:wrap;
     }
-    .button-container{ display:flex; gap:10px; flex:1; min-width:320px; flex-wrap:wrap; }
+    .button-container { display:flex; gap:10px; flex:1; min-width:0; flex-wrap:wrap; }
     button, select{
       background:#5f4e4f; color:#fff; font-size:16px; padding:10px 16px;
       border:0; border-radius:5px; cursor:pointer;
@@ -25,9 +32,14 @@
       width:90%; max-width:700px; flex-grow:1; box-sizing:border-box;
       resize:vertical; font-size:16px; padding:10px;
     }
-    .status{ width:90%; max-width:700px; color:#5f4e4f; font-size:14px; min-height:18px; user-select:none; }
-    .note{ width:90%; max-width:700px; color:#5f4e4f; font-size:13px; line-height:1.35; }
+    .status{ width:100%; max-width:700px; color:#5f4e4f; font-size:14px; min-height:18px; user-select:none; }
+    .note{ width:100%; max-width:700px; color:#5f4e4f; font-size:13px; line-height:1.35; }
     .note code{ background:rgba(95,78,79,.08); padding:1px 4px; border-radius:4px; }
+    @media (max-width: 480px) {
+      .main-container { padding: 12px; }
+      button { padding: 10px 12px; font-size: 15px; }
+      .button-container { gap: 8px; }
+    }
   </style>
 </head>
 
