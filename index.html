@@ -462,12 +462,6 @@ recognition.onresult = (event) => {
 
 
     function resume(){
-      text.setAttribute("readonly", "");
-      isEditMode = false;
-      btnEdit.classList.remove("is-on");
-      editState.textContent = "✓";
-      btnEdit.textContent = "✎";
-      text.blur();
       if (!ensureRecognition() || !sessionActive) return;
 
       // ✅ Keep user edits (in case they edited while paused)
