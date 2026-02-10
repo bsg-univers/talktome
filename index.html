@@ -321,6 +321,8 @@ recognition.onresult = (event) => {
     }
 
     function startNew(){
+      window.speechSynthesis.cancel();
+      btnPlay.textContent = "PLAY";
       if (!ensureRecognition()) return;
 
       // New recording: clear text
@@ -427,19 +429,34 @@ recognition.onresult = (event) => {
     });
 
     btnPlay.addEventListener("click", () => {
+      // Toggle play/stop
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+        btnPlay.textContent = "PLAY";
+        return;
+      }
       readText(text.value);
     });
 
-    function readText(content){
-      if (!content.trim()) return;
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(content);
-      utter.lang = langSelect.value;
-      utter.volume = 1;
-      utter.rate = 1;
-      utter.pitch = 1;
-      window.speechSynthesis.speak(utter);
-    }
+function readText(content){
+  const value = (content || "").trim();
+  if (!value) return;
+
+  window.speechSynthesis.cancel(); // stop any previous speech
+
+  const utter = new SpeechSynthesisUtterance(value);
+  utter.lang = langSelect.value;
+  utter.volume = 1;
+  utter.rate = 1;
+  utter.pitch = 1;
+
+  // Update button label while speaking
+  utter.onstart = () => { btnPlay.textContent = "STOP PLAYBACK"; };
+  utter.onend   = () => { btnPlay.textContent = "PLAY"; };
+  utter.onerror = () => { btnPlay.textContent = "PLAY"; };
+
+  window.speechSynthesis.speak(utter);
+}
 
 
     // Initialize UI
