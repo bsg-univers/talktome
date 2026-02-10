@@ -193,7 +193,7 @@
 
     <div class="text-wrap">
       <button id="btnEdit" class="edit-bar" type="button" aria-label="Toggle edit mode">
-        <span class="edit-label">EDIT</span>
+        <span class="edit-label">"✎"</span>
         <span class="edit-state" id="editState">OFF</span>
       </button>
     
@@ -465,6 +465,7 @@ recognition.onresult = (event) => {
       text.setAttribute("readonly", "");
       isEditMode = false;
       btnEdit.classList.remove("is-on");
+      editState.textContent = "✓";
       btnEdit.textContent = "✎";
       text.blur();
       if (!ensureRecognition() || !sessionActive) return;
