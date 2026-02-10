@@ -102,43 +102,62 @@
     button{ font-size:15px; padding:10px 10px; }
   }
 
-  .text-wrap{
+.text-wrap{
   position: relative;
   width: 100%;
   max-width: 700px;
   box-sizing: border-box;
 }
 
-/* Keep your textarea full-width inside wrapper */
+/* Full-width bar sitting on top of the textarea */
+.edit-bar{
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  height:44px;
+  width:100%;
+  border:0;
+  border-radius:5px 5px 0 0;
+  background:#5f4e4f;
+  color:#fff;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 12px;
+  box-sizing:border-box;
+  font-size:14px;
+}
+
+.edit-bar .edit-label{
+  font-weight:700;
+  letter-spacing:0.3px;
+}
+
+.edit-bar .edit-state{
+  opacity:0.9;
+  font-weight:600;
+}
+
+/* "ON" style */
+.edit-bar.is-on{
+  background:#3f3435;
+}
+
+/* Make the textarea look like one unified card below the bar */
 .text-wrap #text{
-  width: 100%;
-}
+  width:100%;
+  box-sizing:border-box;
+  border:2px solid #5f4e4f;
+  border-radius:5px;
+  overflow:auto;
+  resize:vertical;
+  font-size:16px;
+  padding:10px;
 
-/* Small unobtrusive edit button */
-.icon-btn{
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border-radius: 10px;
-  border: 0;
-  background: rgba(95,78,79,0.14);
-  color: #5f4e4f;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-/* On tap/hover: slightly stronger */
-.icon-btn:hover{ background: rgba(95,78,79,0.22); }
-.icon-btn:active{ transform: scale(0.98); }
-
-/* When in edit mode, make button look "active" */
-.icon-btn.is-on{
-  background: #5f4e4f;
-  color: #fff;
+  /* KEY: push text down so it never sits under the bar */
+  padding-top: 54px;   /* 44px bar + 10px spacing */
 }
 
 </style>
@@ -173,9 +192,15 @@
     <div class="status" id="status"></div>
 
     <div class="text-wrap">
-      <button id="btnEdit" class="icon-btn" type="button" aria-label="Edit text" title="Edit">✎</button>
-      <textarea id="text" readonly cols="30" rows="10" placeholder="Your text will appear here..."></textarea>
+      <button id="btnEdit" class="edit-bar" type="button" aria-label="Toggle edit mode">
+        <span class="edit-label">EDIT</span>
+        <span class="edit-state" id="editState">OFF</span>
+      </button>
+    
+      <textarea id="text" readonly cols="30" rows="10"
+        placeholder="Your text will appear here..."></textarea>
     </div>
+
 
   </div>
 
@@ -192,23 +217,27 @@
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     const btnEdit = document.getElementById("btnEdit");
+    const editState = document.getElementById("editState");
     let isEditMode = false;
 
-    btnEdit.addEventListener("click", () => {
-      isEditMode = !isEditMode;
-    
-      if (isEditMode) {
-        text.removeAttribute("readonly");
-        btnEdit.classList.add("is-on");
-        btnEdit.textContent = "✓";
-        text.focus();           // keyboard opens intentionally
-      } else {
-        text.setAttribute("readonly", "");
-        btnEdit.classList.remove("is-on");
-        btnEdit.textContent = "✎";
-        text.blur();            // hide keyboard
-      }
-    });
+btnEdit.addEventListener("click", () => {
+  isEditMode = !isEditMode;
+
+  if (isEditMode) {
+    text.removeAttribute("readonly");
+    btnEdit.classList.add("is-on");
+    editState.textContent = "ON";
+    text.focus(); // keyboard opens intentionally
+  } else {
+    text.setAttribute("readonly", "");
+    btnEdit.classList.remove("is-on");
+    editState.textContent = "OFF";
+    text.blur(); // hide keyboard
+  }
+});
+
+
+
 
 
     let recognition = null;
