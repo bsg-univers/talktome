@@ -234,10 +234,6 @@
     let isPaused = false;
     let keepAlive = false;         // auto-restart to allow long sessions
     let pendingResume = false;
-    let finalText = "";
-    let lastFinal = "";
-    let lastFinalAt = 0;
-    let stableTextRaw = "";
 
 
 
@@ -391,6 +387,59 @@ btnEdit.addEventListener("click", () => {
       };
 
 recognition.onresult = (event) => {
+  // Normalize for comparisons (spaces + NBSP variants)
+  const norm = (s) =>
+    (s || "")
+      .toLowerCase()
+      .replace(/[\s\u00A0\u202F]+/g, " ")
+      .trim();
+
+  const overlapLen = (a, b) => {
+    const max = Math.min(a.length, b.length);
+    for (let k = max; k > 0; k--) {
+      if (a.slice(-k) === b.slice(0, k)) return k;
+    }
+    return 0;
+  };
+
+  const mergeWithOverlap = (aRaw, bRaw) => {
+    const aN = norm(aRaw);
+    const bN = norm(bRaw);
+    if (!bN) return aRaw;
+
+    // already there
+    if (aN.endsWith(bN)) return aRaw;
+
+    // resent fuller/corrected text
+    if (bN.startsWith(aN) && aN.length > 0) return bRaw;
+
+    const k = overlapLen(aN, bN);
+    if (k <= 0) {
+      const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(bRaw);
+      return aRaw + (needSpace ? " " : "") + bRaw;
+    }
+
+    // cut overlap on word boundary
+    const tokens = bRaw.split(/\s+/).filter(Boolean);
+    let built = "";
+    let cutAt = 0;
+
+    for (let i = 0; i < tokens.length; i++) {
+      const candidate = (built ? built + " " : "") + tokens[i];
+      if (norm(candidate).length >= k) {
+        cutAt = i;
+        break;
+      }
+      built = candidate;
+    }
+
+    const tail = tokens.slice(cutAt + 1).join(" ").trim();
+    if (!tail) return aRaw;
+
+    const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(tail);
+    return aRaw + (needSpace ? " " : "") + tail;
+  };
+
   let interim = "";
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -398,38 +447,33 @@ recognition.onresult = (event) => {
     const raw = res[0]?.transcript || "";
     if (!raw) continue;
 
-    if (res.isFinal) {
-      const normRaw = raw.toLowerCase().replace(/\s+/g, "");
-      const normStable = stableTextRaw.toLowerCase().replace(/\s+/g, "");
-
-      if (normStable.endsWith(normRaw)) continue;
-
-      let words = raw.trim().split(/\s+/);
-      let overlapFound = false;
-      
-      for (let j = words.length; j > 0; j--) {
-        let partial = words.slice(0, j).join("").toLowerCase();
-        if (normStable.endsWith(partial)) {
-          let uniquePart = words.slice(j).join(" ");
-          if (uniquePart) stableTextRaw += " " + uniquePart;
-          overlapFound = true;
-          break;
-        }
-      }
-
-      if (!overlapFound) {
-        stableTextRaw = (stableTextRaw.trim() + " " + raw).trim();
-      }
-    } else {
-      interim = raw;
+    if (!res.isFinal) {
+      interim = raw; // keep only latest interim
+      continue;
     }
+
+    // ✅ IMPORTANT: dedupe + merge using CLEANED text (not raw)
+    const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+    const cleanedNorm = norm(cleaned);
+    if (!cleanedNorm) continue;
+
+    const now = Date.now();
+    const prev = lastByIndex.get(i);
+    if (prev && prev.norm === cleanedNorm && (now - prev.t) < 2500) continue;
+    lastByIndex.set(i, { norm: cleanedNorm, t: now });
+
+    stableText = mergeWithOverlap(stableText, cleaned);
+
+    if (stableText && !/[ \n]$/.test(stableText)) stableText += " ";
   }
 
-  // Always derive the display from the RAW buffer
-  let processedFinal = applyPunctuationAndCommands(stableTextRaw, recognition.lang);
-  text.value = (processedFinal + " " + interim).trim().replace(/\s{2,}/g, " ");
-  text.scrollTop = text.scrollHeight;
+  // Display = stable processed + raw interim (no committing interim)
+  let display = stableText + (interim || "");
+  display = display.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  text.value = display;
+  finalText = text.value;
 };
+
       
       recognition.onerror = (event) => {
         console.log("Speech recognition error:", event.error);
@@ -478,36 +522,35 @@ recognition.onresult = (event) => {
       return true;
     }
 
-    function startNew(){
-      stableTextRaw = "";
-      stableText = "";
-      lastResultIndex = 0; // RESET THIS
-      lastByIndex.clear();
-      lastInterim = "";
+function startNew(){
+  // hard reset for a NEW session
+  stableText = "";
+  lastByIndex.clear();
+  lastInterim = "";
 
-      window.speechSynthesis.cancel();
-      btnPlay.textContent = "PLAY";
-      if (!ensureRecognition()) return;
+  window.speechSynthesis.cancel();
+  btnPlay.textContent = "PLAY";
+  if (!ensureRecognition()) return;
 
-      // New recording: clear text
-      finalText = "";
-      text.value = "";
+  finalText = "";
+  text.value = "";
 
-      sessionActive = true;
-      isPaused = false;
-      keepAlive = true;
+  sessionActive = true;
+  isPaused = false;
+  keepAlive = true;
 
-      setStatus("Listening…");
-      updateUI({listening:true, paused:false});
+  setStatus("Listening…");
+  updateUI({listening:true, paused:false});
 
-      try { recognition.start(); } catch(e) { console.log(e); }
-    }
+  try { recognition.start(); } catch(e) { console.log(e); }
+}
+
 
 function pause(){
   if (!recognition || !sessionActive) return;
-  
-  // Only sync if you want to allow manual edits to be part of the "history"
-  stableTextRaw = text.value; 
+  stableText = (text.value || "").trimEnd();
+  lastByIndex.clear();
+  lastInterim = "";
   
   isPaused = true;
   keepAlive = false;
@@ -526,8 +569,9 @@ function pause(){
 function resume(){
   if (!ensureRecognition() || !sessionActive) return;
 
-  // Sync back to the text area in case the user manually edited text while paused
-  stableTextRaw = text.value;
+  stableText = (text.value || "").trimEnd();
+  lastByIndex.clear();
+  lastInterim = "";
 
   isPaused = false;
   keepAlive = true;
