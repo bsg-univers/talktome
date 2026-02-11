@@ -390,7 +390,12 @@ recognition.onresult = (event) => {
   let interim = "";
 
   // Normalize for matching: lowercase + collapse whitespace
-  const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const norm = (s) =>
+    (s || "")
+      .toLowerCase()
+      .replace(/[\s\u00A0\u202F]+/g, " ") // ✅ include NBSP + narrow NBSP
+      .trim();
+
 
   // Return how many chars of `bNorm` overlap with the end of `aNorm`
   const overlapLen = (aNorm, bNorm) => {
