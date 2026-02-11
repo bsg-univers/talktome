@@ -226,6 +226,18 @@
     let stableText = "";
     const lastByIndex = new Map(); // idx -> { norm, t }
     let lastInterim = "";
+    let lastResultIndex = 0;
+        let recognition = null;
+
+    // state
+    let sessionActive = false;     // started at least once, until STOP
+    let isPaused = false;
+    let keepAlive = false;         // auto-restart to allow long sessions
+    let pendingResume = false;
+    let finalText = "";
+    let lastFinal = "";
+    let lastFinalAt = 0;
+
 
 
 
@@ -347,23 +359,6 @@ btnEdit.addEventListener("click", () => {
   }
 });
 
-
-
-
-
-    let recognition = null;
-
-    // state
-    let sessionActive = false;     // started at least once, until STOP
-    let isPaused = false;
-    let keepAlive = false;         // auto-restart to allow long sessions
-    let pendingResume = false;
-    let finalText = "";
-    let lastFinal = "";
-    let lastFinalAt = 0;
-
-
-
     function setStatus(msg){ statusEl.textContent = msg || ""; }
 
     function updateUI({listening=false, paused=false} = {}) {
@@ -395,106 +390,37 @@ btnEdit.addEventListener("click", () => {
       };
 
 recognition.onresult = (event) => {
-  // Normalize for comparisons (spaces + NBSP variants)
-  const norm = (s) =>
-    (s || "")
-      .toLowerCase()
-      .replace(/[\s\u00A0\u202F]+/g, " ")
-      .trim();
-
-  // Find overlap length where end(a) == start(b) on normalized strings
-  const overlapLen = (a, b) => {
-    const max = Math.min(a.length, b.length);
-    for (let k = max; k > 0; k--) {
-      if (a.slice(-k) === b.slice(0, k)) return k;
-    }
-    return 0;
-  };
-
-  // Append bRaw into aRaw, removing overlap based on normalized strings
-  const mergeWithOverlap = (aRaw, bRaw) => {
-    const aN = norm(aRaw);
-    const bN = norm(bRaw);
-    if (!bN) return aRaw;
-
-    // already there
-    if (aN.endsWith(bN)) return aRaw;
-
-    // engine resent a fuller/corrected text
-    if (bN.startsWith(aN) && aN.length > 0) return bRaw;
-
-    const k = overlapLen(aN, bN);
-    if (k <= 0) {
-      const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(bRaw);
-      return aRaw + (needSpace ? " " : "") + bRaw;
-    }
-
-    // Cut overlap on word boundary (safe, may drop tiny bit but prevents dupes)
-    const tokens = bRaw.split(/\s+/).filter(Boolean);
-    let built = "";
-    let cutAt = 0;
-
-    for (let i = 0; i < tokens.length; i++) {
-      const candidate = (built ? built + " " : "") + tokens[i];
-      if (norm(candidate).length >= k) {
-        cutAt = i;
-        break;
-      }
-      built = candidate;
-    }
-
-    const tail = tokens.slice(cutAt + 1).join(" ").trim();
-    if (!tail) return aRaw;
-
-    const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(tail);
-    return aRaw + (needSpace ? " " : "") + tail;
-  };
-
   let interim = "";
 
-  // Only process NEW/UPDATED results
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     const raw = res[0]?.transcript || "";
 
     if (!raw) continue;
 
-    if (!res.isFinal) {
-      // keep only the latest interim chunk (don’t accumulate)
+    if (res.isFinal) {
+      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+      
+      // Prevent duplication by index tracking
+      if (i >= lastResultIndex) {
+        // Append with a space only if stableText isn't empty
+        stableText = stableText.trim() ? stableText.trim() + " " + cleaned : cleaned;
+        lastResultIndex = i + 1;
+      }
+    } else {
       interim = raw;
-      continue;
     }
-
-    // Clean punctuation/commands only for finals
-    const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-    const cleanedNorm = norm(cleaned);
-    if (!cleanedNorm) continue;
-
-    // Deduplicate “same index resent again”
-    const now = Date.now();
-    const prev = lastByIndex.get(i);
-    if (prev && prev.norm === cleanedNorm && (now - prev.t) < 2500) {
-      continue;
-    }
-    lastByIndex.set(i, { norm: cleanedNorm, t: now });
-
-    // Merge into stableText without duplicating earlier words
-    stableText = mergeWithOverlap(stableText, cleaned);
-
-    // Keep a trailing space for comfort (unless newline)
-    if (stableText && !/[ \n]$/.test(stableText)) stableText += " ";
   }
 
-  // Display = stable + current interim (don’t commit interim)
-  lastInterim = interim;
-  let display = stableText + (lastInterim || "");
-
-  // cleanup
-  display = display.replace(/[ \t]+\n/g, "\n");
-  display = display.replace(/\n{3,}/g, "\n\n");
+  // Combine and clean up whitespace
+  let display = (stableText + " " + interim).trim();
+  display = display.replace(/\s{2,}/g, " "); // Fix double spaces
 
   text.value = display;
-  finalText = text.value; // keep your pause/resume logic happy
+  finalText = display;
+  
+  // Force scroll to bottom
+  text.scrollTop = text.scrollHeight;
 };
       
       recognition.onerror = (event) => {
@@ -546,6 +472,7 @@ recognition.onresult = (event) => {
 
     function startNew(){
       stableText = "";
+      lastResultIndex = 0; // RESET THIS
       lastByIndex.clear();
       lastInterim = "";
 
@@ -570,6 +497,7 @@ recognition.onresult = (event) => {
     function pause(){
       if (!recognition || !sessionActive) return;
       stableText = (text.value || "").trimEnd();
+      lastResultIndex = 0;
       lastByIndex.clear();
       lastInterim = "";
 
@@ -604,6 +532,7 @@ recognition.onresult = (event) => {
     function resume(){
       if (!ensureRecognition() || !sessionActive) return;
       stableText = (text.value || "").trimEnd();
+      lastResultIndex = 0;
       lastByIndex.clear();
       lastInterim = "";
 
