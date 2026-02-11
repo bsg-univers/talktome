@@ -392,6 +392,7 @@ btnEdit.addEventListener("click", () => {
 recognition.onresult = (event) => {
   let interim = "";
 
+  // Iterate through all results provided in this event
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     const raw = res[0]?.transcript || "";
@@ -399,27 +400,36 @@ recognition.onresult = (event) => {
     if (!raw) continue;
 
     if (res.isFinal) {
-      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-      
-      // Prevent duplication by index tracking
+      // Use a strict counter to ensure we only process each index ONCE
       if (i >= lastResultIndex) {
-        // Append with a space only if stableText isn't empty
-        stableText = stableText.trim() ? stableText.trim() + " " + cleaned : cleaned;
+        const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+        
+        // Build stableText word by word, ensuring no leading/trailing double spaces
+        if (stableText.trim() === "") {
+          stableText = cleaned;
+        } else {
+          stableText = stableText.trim() + " " + cleaned;
+        }
+        
+        // Crucial: Increment our local tracker
         lastResultIndex = i + 1;
       }
     } else {
+      // Temporary text for the user to see while speaking
       interim = raw;
     }
   }
 
-  // Combine and clean up whitespace
+  // Combine committed text with the current interim "preview"
   let display = (stableText + " " + interim).trim();
-  display = display.replace(/\s{2,}/g, " "); // Fix double spaces
+
+  // Clean up any double spaces that might slip through
+  display = display.replace(/\s{2,}/g, " ");
 
   text.value = display;
   finalText = display;
   
-  // Force scroll to bottom
+  // Keep the latest text in view
   text.scrollTop = text.scrollHeight;
 };
       
