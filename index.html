@@ -392,44 +392,49 @@ btnEdit.addEventListener("click", () => {
 recognition.onresult = (event) => {
   let interim = "";
 
-  // Iterate through all results provided in this event
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     const raw = res[0]?.transcript || "";
-
     if (!raw) continue;
 
     if (res.isFinal) {
-      // Use a strict counter to ensure we only process each index ONCE
-      if (i >= lastResultIndex) {
-        const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-        
-        // Build stableText word by word, ensuring no leading/trailing double spaces
-        if (stableText.trim() === "") {
-          stableText = cleaned;
-        } else {
-          stableText = stableText.trim() + " " + cleaned;
+      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+      
+      // NORMALIZE strings for comparison (lowercase, no spaces)
+      const normStable = stableText.toLowerCase().replace(/\s+/g, "");
+      const normCleaned = cleaned.toLowerCase().replace(/\s+/g, "");
+
+      // If the NEW text is already entirely contained at the end of our OLD text, ignore it
+      if (normStable.endsWith(normCleaned)) continue;
+
+      // OVERLAP CHECK: Handle cases where Chrome sends "Salut" then "Salut comment ça va"
+      // We look for a chunk of words that already exists at the end
+      let words = cleaned.split(" ");
+      let overlapFound = false;
+      
+      for (let j = 1; j <= words.length; j++) {
+        let partial = words.slice(0, j).join("").toLowerCase();
+        if (normStable.endsWith(partial)) {
+          // We found where it overlaps! We only take the "new" part.
+          let remaining = words.slice(j).join(" ");
+          if (remaining) {
+            stableText = stableText.trim() + " " + remaining;
+          }
+          overlapFound = true;
+          break;
         }
-        
-        // Crucial: Increment our local tracker
-        lastResultIndex = i + 1;
+      }
+
+      if (!overlapFound) {
+        stableText = (stableText.trim() + " " + cleaned).trim();
       }
     } else {
-      // Temporary text for the user to see while speaking
       interim = raw;
     }
   }
 
-  // Combine committed text with the current interim "preview"
   let display = (stableText + " " + interim).trim();
-
-  // Clean up any double spaces that might slip through
-  display = display.replace(/\s{2,}/g, " ");
-
-  text.value = display;
-  finalText = display;
-  
-  // Keep the latest text in view
+  text.value = display.replace(/\s{2,}/g, " ");
   text.scrollTop = text.scrollHeight;
 };
       
