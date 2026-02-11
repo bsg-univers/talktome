@@ -220,6 +220,103 @@
     const editState = document.getElementById("editState");
     let isEditMode = false;
 
+    // --- Spoken punctuation / commands mapping ---
+const PUNCT = {
+  // English
+  "comma": ",",
+  "period": ".",
+  "full stop": ".",
+  "dot": ".",
+  "colon": ":",
+  "semicolon": ";",
+  "question mark": "?",
+  "exclamation mark": "!",
+  "dash": "—",
+  "hyphen": "-",
+  "open quote": "“",
+  "close quote": "”",
+  "open parenthesis": "(",
+  "close parenthesis": ")",
+  "new line": "\n",
+  "new paragraph": "\n\n",
+
+  // French
+  "virgule": ",",
+  "point": ".",
+  "point final": ".",
+  "deux points": ":",
+  "point virgule": ";",
+  "point d'interrogation": "?",
+  "point d’exclamation": "!",
+  "tiret": "—",
+  "ouvrir les guillemets": "«",
+  "fermer les guillemets": "»",
+  "ouvrir parenthèse": "(",
+  "fermer parenthèse": ")",
+  "nouvelle ligne": "\n",
+  "nouveau paragraphe": "\n\n"
+};
+
+// For French typography before : ; ? ! (optional)
+function needsFrenchSpaceBeforePunct(lang){
+  return (lang || "").toLowerCase().startsWith("fr");
+}
+
+function applyPunctuationAndCommands(raw, lang){
+  let s = (raw || "").trim();
+  if (!s) return "";
+
+  const keys = Object.keys(PUNCT).sort((a,b) => b.length - a.length);
+
+  for (const key of keys) {
+    const sym = PUNCT[key];
+
+    const pattern = new RegExp(
+      `(^|[\\s.,;:!?()\\[\\]{}"“”«»])` +
+      `(${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\s+/g, "\\s+")})` +
+      `(?=$|[\\s.,;:!?()\\[\\]{}"“”«»])`,
+      "gi"
+    );
+
+    s = s.replace(pattern, (m, pre) => {
+      if (sym.includes("\n")) return sym; // command
+      return `${pre} ${sym} `;            // keep boundary char
+    });
+  } // ✅ IMPORTANT: close the loop
+
+  // Collapse whitespace but keep newlines
+  s = s.replace(/[ \t]+/g, " ");
+  s = s.replace(/ *\n */g, "\n");
+
+  // Remove spaces before , . ) ] etc.
+  s = s.replace(/\s+([,.\)\]\}])/g, "$1");
+
+  // Handle French required space before : ; ? !
+  if (needsFrenchSpaceBeforePunct(lang)) {
+    const nbspNarrow = "\u202F";
+    s = s.replace(/\s*([:;?!])/g, `${nbspNarrow}$1`);
+  } else {
+    s = s.replace(/\s+([:;?!])/g, "$1");
+  }
+
+  // Ensure single space after punctuation that usually needs it (except newline/end)
+  s = s.replace(/([,;:.?!])(?=[^\s\n])/g, "$1 ");
+
+  // Fix spaces around em dash if used
+  s = s.replace(/\s*—\s*/g, " — ");
+
+  // Clean double spaces again
+  s = s.replace(/[ \t]{2,}/g, " ");
+
+  // Capitalize after sentence end (. ! ?) when followed by a letter
+  s = s.replace(/([.!?])\s+([a-zàâçéèêëîïôùûüÿñæœ])/g, (m, p1, p2) => {
+    return `${p1} ${p2.toUpperCase()}`;
+  });
+
+  return s.trim();
+}
+
+
 btnEdit.addEventListener("click", () => {
   isEditMode = !isEditMode;
 
@@ -302,12 +399,19 @@ recognition.onresult = (event) => {
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const result = event.results[i];
-    const transcript = result[0].transcript || "";
+
+    // Raw transcript from engine
+    const raw = result[0].transcript || "";
 
     if (!result.isFinal) {
-      interim += transcript;
+      // Keep interim as-is (no punctuation replacement, avoids flicker)
+      interim += raw;
       continue;
     }
+
+    // ✅ Apply spoken punctuation / commands to FINAL chunks only
+    // (requires applyPunctuationAndCommands() to exist in your script)
+    const transcript = applyPunctuationAndCommands(raw, recognition.lang) || raw;
 
     const now = Date.now();
     const tNorm = norm(transcript);
@@ -357,6 +461,8 @@ recognition.onresult = (event) => {
       const tail = tokens.slice(cutIndex + 1).join(" ").trim();
       if (tail) {
         finalText += (finalText && !/[ \n]$/.test(finalText) ? " " : "") + tail;
+
+        // Add trailing space unless we end with newline(s)
         if (!/[ \n]$/.test(finalText)) finalText += " ";
       }
       continue;
@@ -364,11 +470,18 @@ recognition.onresult = (event) => {
 
     // Fallback: no detectable overlap — append normally
     finalText += transcript;
+
+    // Add trailing space unless we end with newline(s)
     if (!/[ \n]$/.test(finalText)) finalText += " ";
   }
 
+  // Show final + interim while listening
+  finalText = finalText.replace(/[ \t]+\n/g, "\n"); // no spaces before newline
+  finalText = finalText.replace(/\n{3,}/g, "\n\n"); // cap crazy paragraph breaks
+
   text.value = finalText + interim;
 };
+
 
 
 
