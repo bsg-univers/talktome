@@ -220,6 +220,11 @@
     const editState = document.getElementById("editState");
     let isEditMode = false;
 
+    let processedFinal = new Set();     // stores keys like "i:timestamp-ish"
+    let processedQueue = [];            // to cap memory
+    const PROCESSED_MAX = 200;          // keep last 200 finals
+
+
     // --- Spoken punctuation / commands mapping ---
 const PUNCT = {
   // English
@@ -389,102 +394,72 @@ btnEdit.addEventListener("click", () => {
 recognition.onresult = (event) => {
   let interim = "";
 
-  // Normalize for matching: lowercase + collapse whitespace
+  // Normalize for matching: lowercase + collapse whitespace + NBSP variants
   const norm = (s) =>
     (s || "")
       .toLowerCase()
-      .replace(/[\s\u00A0\u202F]+/g, " ") // ✅ include NBSP + narrow NBSP
+      .replace(/[\s\u00A0\u202F]+/g, " ")
       .trim();
 
-
-  // Return how many chars of `bNorm` overlap with the end of `aNorm`
-  const overlapLen = (aNorm, bNorm) => {
-    const max = Math.min(aNorm.length, bNorm.length);
-    for (let k = max; k > 0; k--) {
-      if (aNorm.slice(-k) === bNorm.slice(0, k)) return k;
-    }
-    return 0;
-  };
+  // If you want a very cheap “same final spam” guard too
+  const now = Date.now();
 
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const result = event.results[i];
-
-    // Raw transcript from engine
-    const raw = result[0].transcript || "";
+    const raw = result[0]?.transcript || "";
 
     if (!result.isFinal) {
-      // Keep interim as-is (no punctuation replacement, avoids flicker)
       interim += raw;
       continue;
     }
 
-    // ✅ Apply spoken punctuation / commands to FINAL chunks only
-    // (requires applyPunctuationAndCommands() to exist in your script)
+    // ---- HARD GUARD: process each final result only once ----
+    // We build a key from index + confidence + raw transcript length + first/last chars.
+    // (Mobile engines often resend the same `i` as final multiple times.)
+    const conf = (result[0]?.confidence ?? 0);
+    const sig =
+      `${i}|${raw.length}|${conf.toFixed(3)}|${raw.slice(0, 8)}|${raw.slice(-8)}`;
+
+    if (processedFinal.has(sig)) {
+      continue;
+    }
+    processedFinal.add(sig);
+    processedQueue.push(sig);
+    if (processedQueue.length > PROCESSED_MAX) {
+      const old = processedQueue.shift();
+      processedFinal.delete(old);
+    }
+
+    // Apply punctuation/commands to FINAL chunks only
     const transcript = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-
-    const now = Date.now();
     const tNorm = norm(transcript);
+    if (!tNorm) continue;
 
-    // 1) Quick exact-repeat guard
-    if (tNorm && tNorm === lastFinal && (now - lastFinalAt) < 2000) {
+    // ---- SECONDARY GUARD: drop repeated finals within 2s ----
+    if (tNorm === lastFinal && (now - lastFinalAt) < 2000) {
       continue;
     }
     lastFinal = tNorm;
     lastFinalAt = now;
 
-    // 2) Overlap-safe append (prevents duplicates on mobile Edge)
+    // ---- APPEND (simple + stable) ----
+    // Instead of complex overlap cutting (which can misfire once you transform text),
+    // do a safer “endsWith” check on normalized finalText.
     const ftNorm = norm(finalText);
 
-    if (!tNorm) continue;
+    if (!ftNorm.endsWith(tNorm)) {
+      // Add a space if needed, unless we’re starting or previous char is newline
+      const needsSpace =
+        finalText && !/[ \n]$/.test(finalText) && !/^[\n]/.test(transcript);
 
-    // If the new transcript is entirely already contained at the end, skip
-    if (ftNorm.endsWith(tNorm)) continue;
+      finalText += (needsSpace ? " " : "") + transcript;
 
-    // If the new transcript fully contains what we already have, replace with the new one
-    // (some engines resend a "corrected" full chunk)
-    if (tNorm.includes(ftNorm) && ftNorm.length > 0 && tNorm.length >= ftNorm.length) {
-      finalText = transcript;
+      // Add trailing space unless we end with newline(s)
       if (!/[ \n]$/.test(finalText)) finalText += " ";
-      continue;
     }
-
-    // Append only the non-overlapping tail
-    const k = overlapLen(ftNorm, tNorm);
-    if (k > 0) {
-      // We need to cut the ORIGINAL transcript in a way that corresponds to k normalized chars.
-      // Do a best-effort: rebuild the tail by scanning original transcript tokens.
-      const tokens = transcript.split(/\s+/);
-      let builtNorm = "";
-      let cutIndex = 0;
-
-      for (let ti = 0; ti < tokens.length; ti++) {
-        const nextNorm = norm((builtNorm ? builtNorm + " " : "") + tokens[ti]);
-        if (nextNorm.length >= k) {
-          cutIndex = ti; // overlap ends inside/at this token
-          break;
-        }
-        builtNorm = (builtNorm ? builtNorm + " " : "") + tokens[ti];
-      }
-
-      // Tail starts after the overlap tokens (safe, may drop a tiny bit rather than duplicate)
-      const tail = tokens.slice(cutIndex + 1).join(" ").trim();
-      if (tail) {
-        finalText += (finalText && !/[ \n]$/.test(finalText) ? " " : "") + tail;
-
-        // Add trailing space unless we end with newline(s)
-        if (!/[ \n]$/.test(finalText)) finalText += " ";
-      }
-      continue;
-    }
-
-    // Fallback: no detectable overlap — append normally
-    finalText += transcript;
-
-    // Add trailing space unless we end with newline(s)
-    if (!/[ \n]$/.test(finalText)) finalText += " ";
   }
 
-  // Show final + interim while listening
+  // Cleanup display text
   finalText = finalText.replace(/[ \t]+\n/g, "\n"); // no spaces before newline
   finalText = finalText.replace(/\n{3,}/g, "\n\n"); // cap crazy paragraph breaks
 
