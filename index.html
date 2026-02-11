@@ -308,10 +308,14 @@ function applyPunctuationAndCommands(raw, lang){
   // Clean double spaces again
   s = s.replace(/[ \t]{2,}/g, " ");
 
-  // Capitalize after sentence end (. ! ?) when followed by a letter
-  s = s.replace(/([.!?])\s+([a-zàâçéèêëîïôùûüÿñæœ])/g, (m, p1, p2) => {
-    return `${p1} ${p2.toUpperCase()}`;
-  });
+  // Capitalize very first letter of the chunk (start of dictation)
+  s = s.replace(/^(\s*[«"“”(\[]*\s*)([a-zàâçéèêëîïôùûüÿñæœ])/,
+                (m, p1, p2) => p1 + p2.toUpperCase());
+  
+  // Also capitalize after a newline / paragraph break
+  s = s.replace(/(\n\s*[«"“”(\[]*\s*)([a-zàâçéèêëîïôùûüÿñæœ])/g,
+                (m, p1, p2) => p1 + p2.toUpperCase());
+
 
   return s.trim();
 }
