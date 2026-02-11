@@ -220,12 +220,13 @@
     const editState = document.getElementById("editState");
     let isEditMode = false;
 
-    let processedFinal = new Set();     // stores keys like "i:timestamp-ish"
-    let processedQueue = [];            // to cap memory
-    const PROCESSED_MAX = 200;          // keep last 200 finals
-    let stableText = "";           // committed text
-    let lastChunkNorm = "";        // last normalized chunk (for spam guard)
-    let lastCommitAt = 0;
+
+
+    // Put these globals near your other state (once)
+    let stableText = "";
+    const lastByIndex = new Map(); // idx -> { norm, t }
+    let lastInterim = "";
+
 
 
 
@@ -356,8 +357,6 @@ btnEdit.addEventListener("click", () => {
     let sessionActive = false;     // started at least once, until STOP
     let isPaused = false;
     let keepAlive = false;         // auto-restart to allow long sessions
-    let lastResultIndex = 0;
-    let shouldCapitalizeNext = true;
     let pendingResume = false;
     let finalText = "";
     let lastFinal = "";
@@ -396,83 +395,108 @@ btnEdit.addEventListener("click", () => {
       };
 
 recognition.onresult = (event) => {
-  // Normalizer (include NBSP + narrow NBSP)
+  // Normalize for comparisons (spaces + NBSP variants)
   const norm = (s) =>
     (s || "")
       .toLowerCase()
       .replace(/[\s\u00A0\u202F]+/g, " ")
       .trim();
 
-  // Build the current rolling chunk from the engine output
-  let finals = "";
+  // Find overlap length where end(a) == start(b) on normalized strings
+  const overlapLen = (a, b) => {
+    const max = Math.min(a.length, b.length);
+    for (let k = max; k > 0; k--) {
+      if (a.slice(-k) === b.slice(0, k)) return k;
+    }
+    return 0;
+  };
+
+  // Append bRaw into aRaw, removing overlap based on normalized strings
+  const mergeWithOverlap = (aRaw, bRaw) => {
+    const aN = norm(aRaw);
+    const bN = norm(bRaw);
+    if (!bN) return aRaw;
+
+    // already there
+    if (aN.endsWith(bN)) return aRaw;
+
+    // engine resent a fuller/corrected text
+    if (bN.startsWith(aN) && aN.length > 0) return bRaw;
+
+    const k = overlapLen(aN, bN);
+    if (k <= 0) {
+      const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(bRaw);
+      return aRaw + (needSpace ? " " : "") + bRaw;
+    }
+
+    // Cut overlap on word boundary (safe, may drop tiny bit but prevents dupes)
+    const tokens = bRaw.split(/\s+/).filter(Boolean);
+    let built = "";
+    let cutAt = 0;
+
+    for (let i = 0; i < tokens.length; i++) {
+      const candidate = (built ? built + " " : "") + tokens[i];
+      if (norm(candidate).length >= k) {
+        cutAt = i;
+        break;
+      }
+      built = candidate;
+    }
+
+    const tail = tokens.slice(cutAt + 1).join(" ").trim();
+    if (!tail) return aRaw;
+
+    const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(tail);
+    return aRaw + (needSpace ? " " : "") + tail;
+  };
+
   let interim = "";
 
-  for (let i = 0; i < event.results.length; i++) {
+  // Only process NEW/UPDATED results
+  for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     const raw = res[0]?.transcript || "";
 
-    if (res.isFinal) {
-      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-      finals += cleaned;
-      if (finals && !/[ \n]$/.test(finals)) finals += " ";
-    } else {
-      interim += raw;
-    }
-  }
+    if (!raw) continue;
 
-  // The engine’s idea of "current text"
-  const chunkText = (finals + interim).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
-  const chunkNorm = norm(chunkText);
-
-  // Spam guard: same chunk repeated rapidly (Chrome Android sometimes fires identical frames)
-  const now = Date.now();
-  if (chunkNorm && chunkNorm === lastChunkNorm && (now - lastFinalAt) < 300) {
-    return;
-  }
-  lastChunkNorm = chunkNorm;
-  lastFinalAt = now;
-
-  // Make stable prefix comparison robust
-  const stableNorm = norm(stableText);
-
-  // If the new chunk includes our stable text as a prefix, just show stable + remainder.
-  // This prevents duplication because we do not "append" blindly.
-  if (stableNorm && chunkNorm.startsWith(stableNorm)) {
-    // Compute remainder in a safe way using lengths of normalized strings is tricky,
-    // so we do a simpler approach: if raw startsWith stableText, slice by raw length.
-    // If not, fall back to full chunkText.
-    let display = chunkText;
-
-    if (chunkText.startsWith(stableText)) {
-      display = stableText + chunkText.slice(stableText.length);
+    if (!res.isFinal) {
+      // keep only the latest interim chunk (don’t accumulate)
+      interim = raw;
+      continue;
     }
 
-    text.value = display;
-  } else {
-    // The engine "corrected" earlier text or diverged; show the chunk as-is
-    text.value = chunkText;
-  }
+    // Clean punctuation/commands only for finals
+    const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+    const cleanedNorm = norm(cleaned);
+    if (!cleanedNorm) continue;
 
-  // ---- Commit strategy ----
-  // When we have finals (i.e., the engine confirmed something), commit to stableText.
-  // BUT: only commit if finals is not empty, and avoid committing too often.
-  if (finals.trim()) {
-    // On Chrome Android, committing every single frame can “lock in” mistakes.
-    // Commit at most every 400ms.
-    if (now - lastCommitAt > 400) {
-      stableText = finals;       // commit only confirmed finals
-      lastCommitAt = now;
+    // Deduplicate “same index resent again”
+    const now = Date.now();
+    const prev = lastByIndex.get(i);
+    if (prev && prev.norm === cleanedNorm && (now - prev.t) < 2500) {
+      continue;
     }
+    lastByIndex.set(i, { norm: cleanedNorm, t: now });
+
+    // Merge into stableText without duplicating earlier words
+    stableText = mergeWithOverlap(stableText, cleaned);
+
+    // Keep a trailing space for comfort (unless newline)
+    if (stableText && !/[ \n]$/.test(stableText)) stableText += " ";
   }
 
-  // Keep your existing finalText in sync (so pause/resume keeps edits)
-  finalText = text.value;
+  // Display = stable + current interim (don’t commit interim)
+  lastInterim = interim;
+  let display = stableText + (lastInterim || "");
+
+  // cleanup
+  display = display.replace(/[ \t]+\n/g, "\n");
+  display = display.replace(/\n{3,}/g, "\n\n");
+
+  text.value = display;
+  finalText = text.value; // keep your pause/resume logic happy
 };
-
-
-
-
-
+      
       recognition.onerror = (event) => {
         console.log("Speech recognition error:", event.error);
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -521,6 +545,10 @@ recognition.onresult = (event) => {
     }
 
     function startNew(){
+      stableText = "";
+      lastByIndex.clear();
+      lastInterim = "";
+
       window.speechSynthesis.cancel();
       btnPlay.textContent = "PLAY";
       if (!ensureRecognition()) return;
@@ -528,8 +556,6 @@ recognition.onresult = (event) => {
       // New recording: clear text
       finalText = "";
       text.value = "";
-      lastResultIndex = 0;
-      shouldCapitalizeNext = true;
 
       sessionActive = true;
       isPaused = false;
@@ -543,6 +569,10 @@ recognition.onresult = (event) => {
 
     function pause(){
       if (!recognition || !sessionActive) return;
+      stableText = (text.value || "").trimEnd();
+      lastByIndex.clear();
+      lastInterim = "";
+
     
       // ✅ Keep user edits: make the textarea the source of truth
       finalText = text.value || "";
@@ -573,6 +603,10 @@ recognition.onresult = (event) => {
 
     function resume(){
       if (!ensureRecognition() || !sessionActive) return;
+      stableText = (text.value || "").trimEnd();
+      lastByIndex.clear();
+      lastInterim = "";
+
 
       // ✅ Keep user edits (in case they edited while paused)
       finalText = text.value || "";
