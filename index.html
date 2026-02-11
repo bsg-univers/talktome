@@ -223,6 +223,10 @@
     let processedFinal = new Set();     // stores keys like "i:timestamp-ish"
     let processedQueue = [];            // to cap memory
     const PROCESSED_MAX = 200;          // keep last 200 finals
+    let stableText = "";           // committed text
+    let lastChunkNorm = "";        // last normalized chunk (for spam guard)
+    let lastCommitAt = 0;
+
 
 
     // --- Spoken punctuation / commands mapping ---
@@ -392,79 +396,79 @@ btnEdit.addEventListener("click", () => {
       };
 
 recognition.onresult = (event) => {
-  let interim = "";
-
-  // Normalize for matching: lowercase + collapse whitespace + NBSP variants
+  // Normalizer (include NBSP + narrow NBSP)
   const norm = (s) =>
     (s || "")
       .toLowerCase()
       .replace(/[\s\u00A0\u202F]+/g, " ")
       .trim();
 
-  // If you want a very cheap “same final spam” guard too
-  const now = Date.now();
+  // Build the current rolling chunk from the engine output
+  let finals = "";
+  let interim = "";
 
-  for (let i = event.resultIndex; i < event.results.length; i++) {
-    const result = event.results[i];
-    const raw = result[0]?.transcript || "";
+  for (let i = 0; i < event.results.length; i++) {
+    const res = event.results[i];
+    const raw = res[0]?.transcript || "";
 
-    if (!result.isFinal) {
+    if (res.isFinal) {
+      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
+      finals += cleaned;
+      if (finals && !/[ \n]$/.test(finals)) finals += " ";
+    } else {
       interim += raw;
-      continue;
-    }
-
-    // ---- HARD GUARD: process each final result only once ----
-    // We build a key from index + confidence + raw transcript length + first/last chars.
-    // (Mobile engines often resend the same `i` as final multiple times.)
-    const conf = (result[0]?.confidence ?? 0);
-    const sig =
-      `${i}|${raw.length}|${conf.toFixed(3)}|${raw.slice(0, 8)}|${raw.slice(-8)}`;
-
-    if (processedFinal.has(sig)) {
-      continue;
-    }
-    processedFinal.add(sig);
-    processedQueue.push(sig);
-    if (processedQueue.length > PROCESSED_MAX) {
-      const old = processedQueue.shift();
-      processedFinal.delete(old);
-    }
-
-    // Apply punctuation/commands to FINAL chunks only
-    const transcript = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-    const tNorm = norm(transcript);
-    if (!tNorm) continue;
-
-    // ---- SECONDARY GUARD: drop repeated finals within 2s ----
-    if (tNorm === lastFinal && (now - lastFinalAt) < 2000) {
-      continue;
-    }
-    lastFinal = tNorm;
-    lastFinalAt = now;
-
-    // ---- APPEND (simple + stable) ----
-    // Instead of complex overlap cutting (which can misfire once you transform text),
-    // do a safer “endsWith” check on normalized finalText.
-    const ftNorm = norm(finalText);
-
-    if (!ftNorm.endsWith(tNorm)) {
-      // Add a space if needed, unless we’re starting or previous char is newline
-      const needsSpace =
-        finalText && !/[ \n]$/.test(finalText) && !/^[\n]/.test(transcript);
-
-      finalText += (needsSpace ? " " : "") + transcript;
-
-      // Add trailing space unless we end with newline(s)
-      if (!/[ \n]$/.test(finalText)) finalText += " ";
     }
   }
 
-  // Cleanup display text
-  finalText = finalText.replace(/[ \t]+\n/g, "\n"); // no spaces before newline
-  finalText = finalText.replace(/\n{3,}/g, "\n\n"); // cap crazy paragraph breaks
+  // The engine’s idea of "current text"
+  const chunkText = (finals + interim).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  const chunkNorm = norm(chunkText);
 
-  text.value = finalText + interim;
+  // Spam guard: same chunk repeated rapidly (Chrome Android sometimes fires identical frames)
+  const now = Date.now();
+  if (chunkNorm && chunkNorm === lastChunkNorm && (now - lastFinalAt) < 300) {
+    return;
+  }
+  lastChunkNorm = chunkNorm;
+  lastFinalAt = now;
+
+  // Make stable prefix comparison robust
+  const stableNorm = norm(stableText);
+
+  // If the new chunk includes our stable text as a prefix, just show stable + remainder.
+  // This prevents duplication because we do not "append" blindly.
+  if (stableNorm && chunkNorm.startsWith(stableNorm)) {
+    // Compute remainder in a safe way using lengths of normalized strings is tricky,
+    // so we do a simpler approach: if raw startsWith stableText, slice by raw length.
+    // If not, fall back to full chunkText.
+    let display = chunkText;
+
+    if (chunkText.startsWith(stableText)) {
+      display = stableText + chunkText.slice(stableText.length);
+    }
+
+    text.value = display;
+  } else {
+    // The engine "corrected" earlier text or diverged; show the chunk as-is
+    text.value = chunkText;
+  }
+
+  // ---- Commit strategy ----
+  // When we have finals (i.e., the engine confirmed something), commit to stableText.
+  // BUT: only commit if finals is not empty, and avoid committing too often.
+  if (finals.trim()) {
+    // On Chrome Android, committing every single frame can “lock in” mistakes.
+    // Commit at most every 400ms.
+    if (now - lastCommitAt > 400) {
+      stableText = finals;       // commit only confirmed finals
+      lastCommitAt = now;
+    }
+  }
+
+  // Keep your existing finalText in sync (so pause/resume keeps edits)
+  finalText = text.value;
 };
+
 
 
 
