@@ -237,6 +237,7 @@
     let finalText = "";
     let lastFinal = "";
     let lastFinalAt = 0;
+    let stableTextRaw = "";
 
 
 
@@ -398,43 +399,35 @@ recognition.onresult = (event) => {
     if (!raw) continue;
 
     if (res.isFinal) {
-      const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-      
-      // NORMALIZE strings for comparison (lowercase, no spaces)
-      const normStable = stableText.toLowerCase().replace(/\s+/g, "");
-      const normCleaned = cleaned.toLowerCase().replace(/\s+/g, "");
+      const normRaw = raw.toLowerCase().replace(/\s+/g, "");
+      const normStable = stableTextRaw.toLowerCase().replace(/\s+/g, "");
 
-      // If the NEW text is already entirely contained at the end of our OLD text, ignore it
-      if (normStable.endsWith(normCleaned)) continue;
+      if (normStable.endsWith(normRaw)) continue;
 
-      // OVERLAP CHECK: Handle cases where Chrome sends "Salut" then "Salut comment ça va"
-      // We look for a chunk of words that already exists at the end
-      let words = cleaned.split(" ");
+      let words = raw.trim().split(/\s+/);
       let overlapFound = false;
       
-      for (let j = 1; j <= words.length; j++) {
+      for (let j = words.length; j > 0; j--) {
         let partial = words.slice(0, j).join("").toLowerCase();
         if (normStable.endsWith(partial)) {
-          // We found where it overlaps! We only take the "new" part.
-          let remaining = words.slice(j).join(" ");
-          if (remaining) {
-            stableText = stableText.trim() + " " + remaining;
-          }
+          let uniquePart = words.slice(j).join(" ");
+          if (uniquePart) stableTextRaw += " " + uniquePart;
           overlapFound = true;
           break;
         }
       }
 
       if (!overlapFound) {
-        stableText = (stableText.trim() + " " + cleaned).trim();
+        stableTextRaw = (stableTextRaw.trim() + " " + raw).trim();
       }
     } else {
       interim = raw;
     }
   }
 
-  let display = (stableText + " " + interim).trim();
-  text.value = display.replace(/\s{2,}/g, " ");
+  // Always derive the display from the RAW buffer
+  let processedFinal = applyPunctuationAndCommands(stableTextRaw, recognition.lang);
+  text.value = (processedFinal + " " + interim).trim().replace(/\s{2,}/g, " ");
   text.scrollTop = text.scrollHeight;
 };
       
@@ -486,6 +479,7 @@ recognition.onresult = (event) => {
     }
 
     function startNew(){
+      stableTextRaw = "";
       stableText = "";
       lastResultIndex = 0; // RESET THIS
       lastByIndex.clear();
@@ -509,75 +503,44 @@ recognition.onresult = (event) => {
       try { recognition.start(); } catch(e) { console.log(e); }
     }
 
-    function pause(){
-      if (!recognition || !sessionActive) return;
-      stableText = (text.value || "").trimEnd();
-      lastResultIndex = 0;
-      lastByIndex.clear();
-      lastInterim = "";
+function pause(){
+  if (!recognition || !sessionActive) return;
+  
+  // Only sync if you want to allow manual edits to be part of the "history"
+  stableTextRaw = text.value; 
+  
+  isPaused = true;
+  keepAlive = false;
 
-    
-      // ✅ Keep user edits: make the textarea the source of truth
-      finalText = text.value || "";
-      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
-    
-      // (recommended) reset dedupe state after manual edits
-      lastFinal = "";
-      lastFinalAt = 0;
-    
-      isPaused = true;
-      keepAlive = false;
-    
-      // ✅ Auto-enter edit mode BEFORE stopping recognition (more stable on mobile)
-      text.removeAttribute("readonly");
-      isEditMode = true;
-      btnEdit.classList.add("is-on");
-      editState.textContent = "ON";
-      // prevent scroll jump in some browsers (optional):
-      text.focus({ preventScroll: true });
-    
-      setStatus("Paused.");
-      updateUI({listening:false, paused:true});
-    
-      try { recognition.stop(); } catch(e) { console.log(e); }
+  text.removeAttribute("readonly");
+  isEditMode = true;
+  btnEdit.classList.add("is-on");
+  editState.textContent = "ON";
+  text.focus({ preventScroll: true });
+
+  setStatus("Paused.");
+  updateUI({listening:false, paused:true});
+  try { recognition.stop(); } catch(e) { console.log(e); }
+}
+
+function resume(){
+  if (!ensureRecognition() || !sessionActive) return;
+
+  // Sync back to the text area in case the user manually edited text while paused
+  stableTextRaw = text.value;
+
+  isPaused = false;
+  keepAlive = true;
+  setStatus("Listening…");
+  updateUI({listening:true, paused:false});
+
+  setTimeout(() => {
+    try { recognition.start(); }
+    catch (e) {
+      setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
     }
-
-
-
-    function resume(){
-      if (!ensureRecognition() || !sessionActive) return;
-      stableText = (text.value || "").trimEnd();
-      lastResultIndex = 0;
-      lastByIndex.clear();
-      lastInterim = "";
-
-
-      // ✅ Keep user edits (in case they edited while paused)
-      finalText = text.value || "";
-      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
-
-      // (recommended) reset dedupe state after manual edits
-      lastFinal = "";
-      lastFinalAt = 0;
-
-      isPaused = false;
-      keepAlive = true;
-      pendingResume = false; // not used in your current resume logic
-
-      setStatus("Listening…");
-      updateUI({listening:true, paused:false});
-
-      // Prevent "first phrase lost" by restarting a moment later
-      lastResultIndex = 0;
-
-      setTimeout(() => {
-        try { recognition.start(); }
-        catch (e) {
-          // If it complains it's still stopping, retry once shortly after
-          setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
-        }
-      }, 200);
-    }
+  }, 200);
+}
 
 
 
