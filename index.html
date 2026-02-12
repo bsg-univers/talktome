@@ -455,12 +455,7 @@ recognition.onresult = (event) => {
       keepAlive = false;
     
       // ✅ Auto-enter edit mode BEFORE stopping recognition (more stable on mobile)
-      text.removeAttribute("readonly");
-      isEditMode = true;
-      btnEdit.classList.add("is-on");
-      editState.textContent = "ON";
-      // prevent scroll jump in some browsers (optional):
-      text.focus({ preventScroll: true });
+
     
       setStatus("Paused.");
       updateUI({listening:false, paused:true});
