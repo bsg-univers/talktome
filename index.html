@@ -220,126 +220,6 @@
     const editState = document.getElementById("editState");
     let isEditMode = false;
 
-
-
-    // Put these globals near your other state (once)
-    let stableText = "";
-    const lastByIndex = new Map(); // idx -> { norm, t }
-    let lastInterim = "";
-    let lastResultIndex = 0;
-        let recognition = null;
-
-    // state
-    let sessionActive = false;     // started at least once, until STOP
-    let isPaused = false;
-    let keepAlive = false;         // auto-restart to allow long sessions
-    let pendingResume = false;
-
-
-
-
-
-    // --- Spoken punctuation / commands mapping ---
-const PUNCT = {
-  // English
-  "comma": ",",
-  "period": ".",
-  "full stop": ".",
-  "dot": ".",
-  "colon": ":",
-  "semicolon": ";",
-  "question mark": "?",
-  "exclamation mark": "!",
-  "dash": "—",
-  "hyphen": "-",
-  "open quote": "“",
-  "close quote": "”",
-  "open parenthesis": "(",
-  "close parenthesis": ")",
-  "new line": "\n",
-  "new paragraph": "\n\n",
-
-  // French
-  "virgule": ",",
-  "point": ".",
-  "point final": ".",
-  "deux points": ":",
-  "point virgule": ";",
-  "d'interrogation": "?",
-  "d'exclamation": "!",
-  "tiret": "—",
-  "premier guillemet": "«",
-  "dernier guillemet": "»",
-  "ouvrir parenthèse": "(",
-  "fermer parenthèse": ")",
-  "nouvelle ligne": "\n",
-  "nouveau paragraphe": "\n\n"
-};
-
-// For French typography before : ; ? ! (optional)
-function needsFrenchSpaceBeforePunct(lang){
-  return (lang || "").toLowerCase().startsWith("fr");
-}
-
-function applyPunctuationAndCommands(raw, lang){
-  let s = (raw || "").trim();
-  if (!s) return "";
-
-  const keys = Object.keys(PUNCT).sort((a,b) => b.length - a.length);
-
-  for (const key of keys) {
-    const sym = PUNCT[key];
-
-    const pattern = new RegExp(
-      `(^|[\\s.,;:!?()\\[\\]{}"“”«»])` +
-      `(${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\s+/g, "\\s+")})` +
-      `(?=$|[\\s.,;:!?()\\[\\]{}"“”«»])`,
-      "gi"
-    );
-
-    s = s.replace(pattern, (m, pre) => {
-      if (sym.includes("\n")) return sym; // command
-      return `${pre} ${sym} `;            // keep boundary char
-    });
-  } // ✅ IMPORTANT: close the loop
-
-  // Collapse whitespace but keep newlines
-  s = s.replace(/[ \t]+/g, " ");
-  s = s.replace(/ *\n */g, "\n");
-
-  // Remove spaces before , . ) ] etc.
-  s = s.replace(/\s+([,.\)\]\}])/g, "$1");
-
-  // Handle French required space before : ; ? !
-  if (needsFrenchSpaceBeforePunct(lang)) {
-    const nbspNarrow = "\u202F";
-    s = s.replace(/\s*([:;?!])/g, `${nbspNarrow}$1`);
-  } else {
-    s = s.replace(/\s+([:;?!])/g, "$1");
-  }
-
-  // Ensure single space after punctuation that usually needs it (except newline/end)
-  s = s.replace(/([,;:.?!])(?=[^\s\n])/g, "$1 ");
-
-  // Fix spaces around em dash if used
-  s = s.replace(/\s*—\s*/g, " — ");
-
-  // Clean double spaces again
-  s = s.replace(/[ \t]{2,}/g, " ");
-
-  // Capitalize very first letter of the chunk (start of dictation)
-  s = s.replace(/^(\s*[«"“”(\[]*\s*)([a-zàâçéèêëîïôùûüÿñæœ])/,
-                (m, p1, p2) => p1 + p2.toUpperCase());
-  
-  // Also capitalize after a newline / paragraph break
-  s = s.replace(/(\n\s*[«"“”(\[]*\s*)([a-zàâçéèêëîïôùûüÿñæœ])/g,
-                (m, p1, p2) => p1 + p2.toUpperCase());
-
-
-  return s.trim();
-}
-
-
 btnEdit.addEventListener("click", () => {
   isEditMode = !isEditMode;
 
@@ -355,6 +235,25 @@ btnEdit.addEventListener("click", () => {
     text.blur(); // hide keyboard
   }
 });
+
+
+
+
+
+    let recognition = null;
+
+    // state
+    let sessionActive = false;     // started at least once, until STOP
+    let isPaused = false;
+    let keepAlive = false;         // auto-restart to allow long sessions
+    let lastResultIndex = 0;
+    let shouldCapitalizeNext = true;
+    let pendingResume = false;
+    let finalText = "";
+    let lastFinal = "";
+    let lastFinalAt = 0;
+
+
 
     function setStatus(msg){ statusEl.textContent = msg || ""; }
 
@@ -387,94 +286,92 @@ btnEdit.addEventListener("click", () => {
       };
 
 recognition.onresult = (event) => {
-  // Normalize for comparisons (spaces + NBSP variants)
-  const norm = (s) =>
-    (s || "")
-      .toLowerCase()
-      .replace(/[\s\u00A0\u202F]+/g, " ")
-      .trim();
+  let interim = "";
 
-  const overlapLen = (a, b) => {
-    const max = Math.min(a.length, b.length);
+  // Normalize for matching: lowercase + collapse whitespace
+  const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Return how many chars of `bNorm` overlap with the end of `aNorm`
+  const overlapLen = (aNorm, bNorm) => {
+    const max = Math.min(aNorm.length, bNorm.length);
     for (let k = max; k > 0; k--) {
-      if (a.slice(-k) === b.slice(0, k)) return k;
+      if (aNorm.slice(-k) === bNorm.slice(0, k)) return k;
     }
     return 0;
   };
 
-  const mergeWithOverlap = (aRaw, bRaw) => {
-    const aN = norm(aRaw);
-    const bN = norm(bRaw);
-    if (!bN) return aRaw;
-
-    // already there
-    if (aN.endsWith(bN)) return aRaw;
-
-    // resent fuller/corrected text
-    if (bN.startsWith(aN) && aN.length > 0) return bRaw;
-
-    const k = overlapLen(aN, bN);
-    if (k <= 0) {
-      const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(bRaw);
-      return aRaw + (needSpace ? " " : "") + bRaw;
-    }
-
-    // cut overlap on word boundary
-    const tokens = bRaw.split(/\s+/).filter(Boolean);
-    let built = "";
-    let cutAt = 0;
-
-    for (let i = 0; i < tokens.length; i++) {
-      const candidate = (built ? built + " " : "") + tokens[i];
-      if (norm(candidate).length >= k) {
-        cutAt = i;
-        break;
-      }
-      built = candidate;
-    }
-
-    const tail = tokens.slice(cutAt + 1).join(" ").trim();
-    if (!tail) return aRaw;
-
-    const needSpace = aRaw && !/[ \n]$/.test(aRaw) && !/^[\n]/.test(tail);
-    return aRaw + (needSpace ? " " : "") + tail;
-  };
-
-  let interim = "";
-
   for (let i = event.resultIndex; i < event.results.length; i++) {
-    const res = event.results[i];
-    const raw = res[0]?.transcript || "";
-    if (!raw) continue;
+    const result = event.results[i];
+    const transcript = result[0].transcript || "";
 
-    if (!res.isFinal) {
-      interim = raw; // keep only latest interim
+    if (!result.isFinal) {
+      interim += transcript;
       continue;
     }
 
-    // ✅ IMPORTANT: dedupe + merge using CLEANED text (not raw)
-    const cleaned = applyPunctuationAndCommands(raw, recognition.lang) || raw;
-    const cleanedNorm = norm(cleaned);
-    if (!cleanedNorm) continue;
-
     const now = Date.now();
-    const prev = lastByIndex.get(i);
-    if (prev && prev.norm === cleanedNorm && (now - prev.t) < 2500) continue;
-    lastByIndex.set(i, { norm: cleanedNorm, t: now });
+    const tNorm = norm(transcript);
 
-    stableText = mergeWithOverlap(stableText, cleaned);
+    // 1) Quick exact-repeat guard
+    if (tNorm && tNorm === lastFinal && (now - lastFinalAt) < 2000) {
+      continue;
+    }
+    lastFinal = tNorm;
+    lastFinalAt = now;
 
-    if (stableText && !/[ \n]$/.test(stableText)) stableText += " ";
+    // 2) Overlap-safe append (prevents duplicates on mobile Edge)
+    const ftNorm = norm(finalText);
+
+    if (!tNorm) continue;
+
+    // If the new transcript is entirely already contained at the end, skip
+    if (ftNorm.endsWith(tNorm)) continue;
+
+    // If the new transcript fully contains what we already have, replace with the new one
+    // (some engines resend a "corrected" full chunk)
+    if (tNorm.includes(ftNorm) && ftNorm.length > 0 && tNorm.length >= ftNorm.length) {
+      finalText = transcript;
+      if (!/[ \n]$/.test(finalText)) finalText += " ";
+      continue;
+    }
+
+    // Append only the non-overlapping tail
+    const k = overlapLen(ftNorm, tNorm);
+    if (k > 0) {
+      // We need to cut the ORIGINAL transcript in a way that corresponds to k normalized chars.
+      // Do a best-effort: rebuild the tail by scanning original transcript tokens.
+      const tokens = transcript.split(/\s+/);
+      let builtNorm = "";
+      let cutIndex = 0;
+
+      for (let ti = 0; ti < tokens.length; ti++) {
+        const nextNorm = norm((builtNorm ? builtNorm + " " : "") + tokens[ti]);
+        if (nextNorm.length >= k) {
+          cutIndex = ti; // overlap ends inside/at this token
+          break;
+        }
+        builtNorm = (builtNorm ? builtNorm + " " : "") + tokens[ti];
+      }
+
+      // Tail starts after the overlap tokens (safe, may drop a tiny bit rather than duplicate)
+      const tail = tokens.slice(cutIndex + 1).join(" ").trim();
+      if (tail) {
+        finalText += (finalText && !/[ \n]$/.test(finalText) ? " " : "") + tail;
+        if (!/[ \n]$/.test(finalText)) finalText += " ";
+      }
+      continue;
+    }
+
+    // Fallback: no detectable overlap — append normally
+    finalText += transcript;
+    if (!/[ \n]$/.test(finalText)) finalText += " ";
   }
 
-  // Display = stable processed + raw interim (no committing interim)
-  let display = stableText + (interim || "");
-  display = display.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
-  text.value = display;
-  finalText = text.value;
+  text.value = finalText + interim;
 };
 
-      
+
+
       recognition.onerror = (event) => {
         console.log("Speech recognition error:", event.error);
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -522,69 +419,86 @@ recognition.onresult = (event) => {
       return true;
     }
 
-function startNew(){
-  // hard reset for a NEW session
-  stableText = "";
-  lastByIndex.clear();
-  lastInterim = "";
+    function startNew(){
+      window.speechSynthesis.cancel();
+      btnPlay.textContent = "PLAY";
+      if (!ensureRecognition()) return;
 
-  window.speechSynthesis.cancel();
-  btnPlay.textContent = "PLAY";
-  if (!ensureRecognition()) return;
+      // New recording: clear text
+      finalText = "";
+      text.value = "";
+      lastResultIndex = 0;
+      shouldCapitalizeNext = true;
 
-  finalText = "";
-  text.value = "";
+      sessionActive = true;
+      isPaused = false;
+      keepAlive = true;
 
-  sessionActive = true;
-  isPaused = false;
-  keepAlive = true;
+      setStatus("Listening…");
+      updateUI({listening:true, paused:false});
 
-  setStatus("Listening…");
-  updateUI({listening:true, paused:false});
-
-  try { recognition.start(); } catch(e) { console.log(e); }
-}
-
-
-function pause(){
-  if (!recognition || !sessionActive) return;
-  stableText = (text.value || "").trimEnd();
-  lastByIndex.clear();
-  lastInterim = "";
-  
-  isPaused = true;
-  keepAlive = false;
-
-  text.removeAttribute("readonly");
-  isEditMode = true;
-  btnEdit.classList.add("is-on");
-  editState.textContent = "ON";
-  text.focus({ preventScroll: true });
-
-  setStatus("Paused.");
-  updateUI({listening:false, paused:true});
-  try { recognition.stop(); } catch(e) { console.log(e); }
-}
-
-function resume(){
-  if (!ensureRecognition() || !sessionActive) return;
-
-  stableText = (text.value || "").trimEnd();
-  lastByIndex.clear();
-  lastInterim = "";
-
-  isPaused = false;
-  keepAlive = true;
-  setStatus("Listening…");
-  updateUI({listening:true, paused:false});
-
-  setTimeout(() => {
-    try { recognition.start(); }
-    catch (e) {
-      setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
+      try { recognition.start(); } catch(e) { console.log(e); }
     }
-  }, 200);
-}
+
+    function pause(){
+      if (!recognition || !sessionActive) return;
+    
+      // ✅ Keep user edits: make the textarea the source of truth
+      finalText = text.value || "";
+      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
+    
+      // (recommended) reset dedupe state after manual edits
+      lastFinal = "";
+      lastFinalAt = 0;
+    
+      isPaused = true;
+      keepAlive = false;
+    
+      // ✅ Auto-enter edit mode BEFORE stopping recognition (more stable on mobile)
+      text.removeAttribute("readonly");
+      isEditMode = true;
+      btnEdit.classList.add("is-on");
+      editState.textContent = "ON";
+      // prevent scroll jump in some browsers (optional):
+      text.focus({ preventScroll: true });
+    
+      setStatus("Paused.");
+      updateUI({listening:false, paused:true});
+    
+      try { recognition.stop(); } catch(e) { console.log(e); }
+    }
+
+
+
+    function resume(){
+      if (!ensureRecognition() || !sessionActive) return;
+
+      // ✅ Keep user edits (in case they edited while paused)
+      finalText = text.value || "";
+      if (finalText && !/[ \n]$/.test(finalText)) finalText += " ";
+
+      // (recommended) reset dedupe state after manual edits
+      lastFinal = "";
+      lastFinalAt = 0;
+
+      isPaused = false;
+      keepAlive = true;
+      pendingResume = false; // not used in your current resume logic
+
+      setStatus("Listening…");
+      updateUI({listening:true, paused:false});
+
+      // Prevent "first phrase lost" by restarting a moment later
+      lastResultIndex = 0;
+
+      setTimeout(() => {
+        try { recognition.start(); }
+        catch (e) {
+          // If it complains it's still stopping, retry once shortly after
+          setTimeout(() => { try { recognition.start(); } catch(_){} }, 350);
+        }
+      }, 200);
+    }
 
 
 
