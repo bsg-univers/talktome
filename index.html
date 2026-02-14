@@ -176,6 +176,31 @@
         padding: 10px;
       }
     }
+    .box { position: relative; } /* add this if not already */
+
+#emptyState{
+  position:absolute;
+  inset: 52px 0 0 0; /* below the header; adjust if your header height differs */
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap: 14px;
+  pointer-events:none;
+  opacity: 0.9;
+}
+
+#emptyState img{
+  width: 90px;
+  height: auto;
+  opacity: 0.9;
+}
+
+#emptyState .emptyText{
+  font-size: 14px;
+  color: rgba(59,45,49,0.85); /* your theme text */
+}
+
   </style>
 </head>
 
@@ -208,12 +233,20 @@
     <div class="status" id="status">Idle.</div>
 
     <div class="box">
-      <div class="boxHeader" id="editToggle">
-        <span>✎</span>
-        <small id="editState">OFF</small>
-      </div>
-      <textarea id="text" placeholder="Your text blooms here 🌸" readonly></textarea>
-    </div>
+  <div class="boxHeader" id="editToggle">
+    <span>✎</span>
+    <small id="editState">OFF</small>
+  </div>
+
+  <!-- Empty state overlay -->
+  <div id="emptyState" aria-hidden="true">
+    <img src="./micro.png" alt="" />
+    <div class="emptyText">Your text blooms here.</div>
+  </div>
+
+  <textarea id="text" readonly></textarea>
+</div>
+
   </div>
 
   <script>
@@ -229,6 +262,19 @@
     const textEl = document.getElementById('text');
     const editToggle = document.getElementById('editToggle');
     const editState = document.getElementById('editState');
+
+    const emptyStateEl = document.getElementById("emptyState");
+
+    function updateEmptyState() {
+      const hasText = normalize(textEl.value).length > 0;
+    
+      // Show only when empty AND not in edit mode (readOnly = true)
+      const show = !hasText && textEl.readOnly;
+    
+      emptyStateEl.style.display = show ? "flex" : "none";
+    }
+
+
 
     function setStatus(msg) { statusEl.textContent = msg; }
 
@@ -274,10 +320,13 @@
     }
 
     function renderTranscript() {
-      const shouldStick = userPinnedToBottom && textEl.readOnly; // don't fight while editing
+      const shouldStick = userPinnedToBottom && textEl.readOnly;
       textEl.value = (committedText + interimText).trimStart();
       if (shouldStick) textEl.scrollTop = textEl.scrollHeight;
+    
+      updateEmptyState();
     }
+
 
     function overlapSuffixPrefix(a, b) {
       const max = Math.min(a.length, b.length);
@@ -529,6 +578,7 @@
 
     // ---------- Init ----------
     setStatus("Idle.");
+    updateEmptyState();
   })();
   </script>
 </body>
