@@ -314,6 +314,15 @@
     function normalize(s) {
       return (s || "").replace(/\s+/g, " ").trim();
     }
+    
+    function commitTextareaToCommitted() {
+      committedText = normalize(textEl.value);
+      interimText = "";
+      lastFinalHypothesis = "";
+      // new segment starts after the committed text
+      segmentStart = committedText.length;
+      renderTranscript();
+    }
 
     function ensureSpace(base) {
       return base.length > 0 && !/\s$/.test(base) ? " " : "";
@@ -427,11 +436,9 @@
         renderTranscript();
       } else {
         // If user edited manually, sync once
-        if (!textEl.readOnly) {
-          committedText = normalize(textEl.value);
-          interimText = "";
-          renderTranscript();
-        }
+        // ✅ Always commit what's currently in the textarea (preserves edits even after leaving edit mode)
+        commitTextareaToCommitted();
+
 
         // Ensure separation before new words after resume
         if (committedText && !/\s$/.test(committedText)) {
@@ -567,14 +574,17 @@
       editing = !editing;
       textEl.readOnly = !editing;
       editState.textContent = editing ? "ON" : "OFF";
-
-      // Optional: stop recognition while editing
-      if (editing && recState === "listening") {
-        pauseRecognition();
+    
+      if (editing) {
+        // Optional: stop recognition while editing
+        if (recState === "listening") pauseRecognition();
+        textEl.focus();
+      } else {
+        // ✅ leaving edit mode: commit edits so they cannot be overwritten later
+        commitTextareaToCommitted();
       }
-
-      if (editing) textEl.focus();
     };
+
 
     // ---------- Init ----------
     setStatus("Idle.");
