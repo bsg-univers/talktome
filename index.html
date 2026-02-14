@@ -244,7 +244,7 @@
       <button id="resumeBtn">RESUME</button>
     </div>
 
-    <div class="status" id="status">Idle.</div>
+    <div class="status" id="status">ᓚᘏᗢ</div>
 
     <div class="box">
   <div class="boxHeader" id="editToggle">
@@ -561,7 +561,7 @@ function overlapTokenCount(full, next) {
       lastFinalCanonTokens = [];
       segmentStart = 0;
       renderTranscript();
-      setStatus("Stopped. Cleared.");
+      setStatus("⋆.˚ ☾⭒.˚");
       shouldClearOnNextStart = true;
       userPinnedToBottom = true;
     }
@@ -589,7 +589,7 @@ function overlapTokenCount(full, next) {
       u.onend = () => {
         currentUtterance = null;
         playBtn.textContent = "PLAY";
-        setStatus(recState === "listening" ? "Listening…" : "Idle.");
+        setStatus(recState === "listening" ? "Listening.." : "ᓚᘏᗢ");
       };
       u.onerror = () => {
         currentUtterance = null;
