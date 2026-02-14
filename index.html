@@ -265,6 +265,20 @@
 
     const emptyStateEl = document.getElementById("emptyState");
 
+    let isComposing = false;
+
+    textEl.addEventListener("compositionstart", () => { isComposing = true; });
+    textEl.addEventListener("compositionend", () => { isComposing = false; });
+    
+    // Optional but helpful: while editing, keep committedText up-to-date as user types
+    textEl.addEventListener("input", () => {
+      if (!textEl.readOnly) {
+        // Don't renderTranscript() here (it would fight the user); just keep model in sync.
+        committedText = textEl.value;  // keep raw edits
+      }
+    });
+
+
     function updateEmptyState() {
       const hasText = normalize(textEl.value).length > 0;
     
@@ -316,13 +330,25 @@
     }
     
     function commitTextareaToCommitted() {
-      committedText = normalize(textEl.value);
-      interimText = "";
-      lastFinalHypothesis = "";
-      // new segment starts after the committed text
-      segmentStart = committedText.length;
-      renderTranscript();
+      return new Promise((resolve) => {
+        const doCommit = () => {
+          committedText = textEl.value;  // raw edits
+          interimText = "";
+          lastFinalHypothesis = "";
+          segmentStart = committedText.length;
+          renderTranscript();
+          resolve();
+        };
+    
+        // Force IME to commit on mobile
+        if (document.activeElement === textEl) textEl.blur();
+    
+        // Wait a tiny moment (more reliable than 1 frame on many Android keyboards)
+        setTimeout(doCommit, 0);
+      });
     }
+
+
 
     function ensureSpace(base) {
       return base.length > 0 && !/\s$/.test(base) ? " " : "";
@@ -437,7 +463,6 @@
       } else {
         // If user edited manually, sync once
         // ✅ Always commit what's currently in the textarea (preserves edits even after leaving edit mode)
-        commitTextareaToCommitted();
 
 
         // Ensure separation before new words after resume
@@ -524,11 +549,17 @@
     }
 
     // ---------- Buttons ----------
-    startBtn.onclick = () => {
+    startBtn.onclick = async () => {
       const clear = shouldClearOnNextStart;
       shouldClearOnNextStart = false;
+    
+      if (!textEl.readOnly) {
+        await commitTextareaToCommitted();
+      }
       startRecognition({ clear });
     };
+
+
 
     stopBtn.onclick = () => {
       stopRecognitionAndClear();
@@ -548,14 +579,19 @@
       }
     };
 
-    resumeBtn.onclick = () => {
-      if (recState !== "listening") startRecognition({ clear: false });
+resumeBtn.onclick = async () => {
+  if (!textEl.readOnly) {
+    await commitTextareaToCommitted();
+  }
+  if (recState !== "listening") startRecognition({ clear: false });
 
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-        setStatus("Speaking…");
-      }
-    };
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
+    setStatus("Speaking…");
+  }
+};
+
+
 
     playBtn.onclick = () => {
       if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
@@ -580,7 +616,6 @@
         if (recState === "listening") pauseRecognition();
         textEl.focus();
       } else {
-        // ✅ leaving edit mode: commit edits so they cannot be overwritten later
         commitTextareaToCommitted();
       }
     };
