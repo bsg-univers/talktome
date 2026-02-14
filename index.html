@@ -2,102 +2,188 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- App-like viewport on mobile (important for Android + notch safe areas) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#5b4b4f" />
   <title>Speech Notes</title>
-<style>
-  :root { --bg:#f6eaf4; --btn:#5b4b4f; --btnDisabled:#a79aa0; --border:#4d3f43; }
 
-  html, body { height: 100%; }
-  body { margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); }
+  <!-- PWA (GitHub Pages-safe relative path) -->
+  <link rel="manifest" href="./manifest.webmanifest" />
 
-  .wrap {
-    max-width: 750px;
-    margin: 0 auto;
-    padding: 14px 12px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    box-sizing: border-box;
-  }
+  <style>
+    :root {
+      --bg:#f6eaf4;
+      --btn:#5b4b4f;
+      --btnDisabled:#a79aa0;
+      --border:#4d3f43;
+      --text:#3b2d31;
+    }
 
-  .row { display:flex; gap:10px; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+    }
 
-  /* Compact buttons */
-  button {
-    flex:1;
-    padding:10px 10px;
-    border:2px solid var(--border);
-    background:var(--btn);
-    color:#fff;
-    font-weight:400;
-    letter-spacing:.4px;
-    border-radius:6px;
-    cursor:pointer;
-    font-size: 14px;
-    line-height: 1.1;
-    min-height: 40px;
-  }
-  button[disabled] { background:var(--btnDisabled); cursor:not-allowed; opacity:.55;}
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      overflow: hidden;                 /* app-like: no page scroll */
+      -webkit-text-size-adjust: 100%;
+      touch-action: manipulation;
+    }
 
-  /* Make PLAY a normal-height single row */
-  .row.single button { flex:1; }
+    /* Main app container */
+    .wrap {
+      max-width: 750px;
+      margin: 0 auto;
 
-  .status { margin: 0 2px; color:#3b2d31; font-size: 13px; }
+      height: 100dvh;                   /* correct visible height on mobile */
+      height: 100vh;                    /* fallback */
 
-  .box {
-    border:2px solid var(--border);
-    border-radius:6px;
-    overflow:hidden;
-    background:#fff;
-    flex: 1;                 /* take remaining space */
-    display: flex;
-    flex-direction: column;
-    min-height: 0;            /* important so textarea can shrink properly */
-  }
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
 
-  .boxHeader{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:8px 10px;
-    background:var(--btn);
-    color:#fff;
-    font-weight:700;
-    cursor:pointer;
-    user-select:none;
-    flex: 0 0 auto;
-  }
-  .boxHeader small { opacity:.85; font-weight:600; }
+      padding: calc(10px + env(safe-area-inset-top))
+               calc(10px + env(safe-area-inset-right))
+               calc(10px + env(safe-area-inset-bottom))
+               calc(10px + env(safe-area-inset-left));
 
-  textarea{
-    width:100%;
-    flex: 1;                 /* fill box */
-    min-height: 0;
-    resize:none;             /* keeps layout stable on mobile */
-    border:0;
-    outline:0;
-    padding:10px;
-    font-size:17px;
-    line-height:1.45;
-    overflow:auto;
-    box-sizing:border-box;
-  }
+      box-sizing: border-box;
+      min-height: 0;
+    }
 
-  /* Compact language selector */
-  #lang{
-    width:100%;
-    padding:10px;
-    border:2px solid var(--border);
-    border-radius:6px;
-    font-size:14px;
-    background:#fff;
-  }
-</style>
+    /* Allow flex children to shrink properly */
+    .wrap > * { min-height: 0; }
 
+    .row { display:flex; gap:10px; }
+
+    /* Language select */
+    #lang{
+      width:100%;
+      padding:10px;
+      border:2px solid var(--border);
+      border-radius:10px;
+      font-size:14px;
+      background:#fff;
+      box-sizing:border-box;
+    }
+
+    /* Compact buttons */
+    button {
+      flex: 1;
+      padding: 10px 10px;
+      border: 2px solid var(--border);
+      background: var(--btn);
+      color: #fff;
+
+      font-weight: 400;
+      letter-spacing: .4px;
+
+      border-radius: 8px;
+      cursor: pointer;
+
+      font-size: 14px;
+      line-height: 1.1;
+
+      min-height: 40px;
+
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    button[disabled] {
+      background: var(--btnDisabled);
+      cursor: not-allowed;
+      opacity: .55;
+    }
+
+    .row.single button { flex:1; }
+
+    .status {
+      margin: 0 2px;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    /* Text area fills remaining space */
+    .box {
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+
+      flex: 1 1 auto;
+      min-height: 0;
+
+      display: flex;
+      flex-direction: column;
+    }
+
+    .boxHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+
+      padding: 10px 12px;
+      background: var(--btn);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+
+      flex: 0 0 auto;
+    }
+
+    .boxHeader small { opacity: .85; font-weight: 600; }
+
+    textarea{
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 0;
+
+      resize: none;
+      border: 0;
+      outline: 0;
+
+      padding: 12px;
+      font-size: 17px;
+      line-height: 1.45;
+
+      overflow: auto;
+      box-sizing: border-box;
+
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Mobile tweaks */
+    @media (max-width: 600px) {
+      .row { gap: 8px; }
+      button {
+        min-height: 36px;
+        font-size: 13px;
+        padding: 9px 8px;
+        border-radius: 10px;
+      }
+      #lang {
+        padding: 9px;
+        font-size: 13px;
+        border-radius: 10px;
+      }
+      textarea {
+        font-size: 16px;
+        padding: 10px;
+      }
+    }
+  </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="row">
-      <select id="lang" style="flex:1;padding:12px;border:2px solid var(--border);border-radius:6px;font-size:16px;">
+      <select id="lang">
         <option value="fr-FR">Français</option>
         <option value="en-US">English (US)</option>
         <option value="en-GB">English (UK)</option>
@@ -131,335 +217,320 @@
     </div>
   </div>
 
-<script>
-(() => {
-  // ---------- UI ----------
-  const langEl = document.getElementById('lang');
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-  const playBtn = document.getElementById('playBtn');
-  const pauseBtn = document.getElementById('pauseBtn');
-  const resumeBtn = document.getElementById('resumeBtn');
-  const statusEl = document.getElementById('status');
-  const textEl = document.getElementById('text');
-  const editToggle = document.getElementById('editToggle');
-  const editState = document.getElementById('editState');
+  <script>
+  (() => {
+    // ---------- UI ----------
+    const langEl = document.getElementById('lang');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const statusEl = document.getElementById('status');
+    const textEl = document.getElementById('text');
+    const editToggle = document.getElementById('editToggle');
+    const editState = document.getElementById('editState');
 
-  let segmentStart = 0; // index in committedText where the current record segment starts (Start/Resume)
+    function setStatus(msg) { statusEl.textContent = msg; }
 
-
-  // --- Auto-scroll control ---
-let userPinnedToBottom = true;
-
-function isNearBottom(el, threshold = 24) {
-  return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
-}
-
-textEl.addEventListener("scroll", () => {
-  // If user scrolls up, stop forcing autoscroll.
-  userPinnedToBottom = isNearBottom(textEl);
-});
-
-
-  function setStatus(msg) { statusEl.textContent = msg; }
-
-  // ---------- Speech Recognition (prefix-growth safe) ----------
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recog = null;
-
-  let recState = "idle";                 // "idle" | "listening"
-  let shouldClearOnNextStart = true;
-
-  let committedText = "";                // what we keep
-  let interimText = "";                  // live interim
-
-  let manualEnd = false;                 // prevents auto-restart on pause/stop
-
-  // The key fix:
-  // Many mobile engines output final results as an ever-growing prefix of the whole utterance.
-  // Track the last final hypothesis and only append the NEW suffix.
-  let lastFinalHypothesis = "";          // normalized text of last final result in current stream
-
-  function normalize(s) {
-    return (s || "").replace(/\s+/g, " ").trim();
-  }
-
- function renderTranscript() {
-  const shouldStick = userPinnedToBottom && textEl.readOnly; // don't fight user while editing
-  textEl.value = (committedText + interimText).trimStart();
-
-  if (shouldStick) {
-    // keep newest text visible
-    textEl.scrollTop = textEl.scrollHeight;
-  }
-}
-
-
-  function ensureSpace(base) {
-    return base.length > 0 && !/\s$/.test(base) ? " " : "";
-  }
-
-  // Returns how many chars of "b" are already covered by suffix of "a"
-  // (max overlap where end(a) == start(b))
-  function overlapSuffixPrefix(a, b) {
-    const max = Math.min(a.length, b.length);
-    for (let k = max; k > 0; k--) {
-      if (a.slice(-k) === b.slice(0, k)) return k;
+    // ---------- PWA (GitHub Pages-safe) ----------
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      });
     }
-    return 0;
-  }
 
-  function appendDeltaFromFinal(finalTextRaw) {
-    const hyp = normalize(finalTextRaw);
-    if (!hyp) return;
+    // ---------- Auto-scroll control ----------
+    let userPinnedToBottom = true;
 
-    const prev = lastFinalHypothesis;
+    function isNearBottom(el, threshold = 24) {
+      return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
+    }
 
-    // Case 1: growing prefix within the current stream
-    if (prev && hyp.startsWith(prev)) {
-      const delta = normalize(hyp.slice(prev.length));
-      if (delta) committedText += ensureSpace(committedText) + delta;
+    textEl.addEventListener("scroll", () => {
+      userPinnedToBottom = isNearBottom(textEl);
+    });
+
+    // ---------- Speech Recognition (mobile-safe + resume-safe) ----------
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recog = null;
+
+    let recState = "idle";                 // "idle" | "listening"
+    let shouldClearOnNextStart = true;
+
+    let committedText = "";
+    let interimText = "";
+
+    let manualEnd = false;
+
+    let lastFinalHypothesis = "";
+    let segmentStart = 0;                  // boundary to allow repeats across Pause/Resume
+
+    function normalize(s) {
+      return (s || "").replace(/\s+/g, " ").trim();
+    }
+
+    function ensureSpace(base) {
+      return base.length > 0 && !/\s$/.test(base) ? " " : "";
+    }
+
+    function renderTranscript() {
+      const shouldStick = userPinnedToBottom && textEl.readOnly; // don't fight while editing
+      textEl.value = (committedText + interimText).trimStart();
+      if (shouldStick) textEl.scrollTop = textEl.scrollHeight;
+    }
+
+    function overlapSuffixPrefix(a, b) {
+      const max = Math.min(a.length, b.length);
+      for (let k = max; k > 0; k--) {
+        if (a.slice(-k) === b.slice(0, k)) return k;
+      }
+      return 0;
+    }
+
+    function appendDeltaFromFinal(finalTextRaw) {
+      const hyp = normalize(finalTextRaw);
+      if (!hyp) return;
+
+      const prev = lastFinalHypothesis;
+
+      // Growing prefix within the current stream
+      if (prev && hyp.startsWith(prev)) {
+        const delta = normalize(hyp.slice(prev.length));
+        if (delta) committedText += ensureSpace(committedText) + delta;
+        lastFinalHypothesis = hyp;
+        return;
+      }
+
+      // Regression; ignore
+      if (prev && prev.startsWith(hyp)) return;
+
+      // Restart/resegmentation: only dedupe/overlap within this segment
+      const segmentText = committedText.slice(segmentStart);
+      const segmentNorm = normalize(segmentText);
+
+      if (segmentNorm && segmentNorm.endsWith(hyp)) {
+        lastFinalHypothesis = hyp;
+        return;
+      }
+
+      const ov = overlapSuffixPrefix(segmentNorm, hyp);
+      const tail = normalize(hyp.slice(ov));
+      if (tail) committedText += ensureSpace(committedText) + tail;
+
       lastFinalHypothesis = hyp;
-      return;
     }
 
-    // Case 2: regression (engine emitted shorter hypothesis); ignore
-    if (prev && prev.startsWith(hyp)) return;
+    function ensureRecognition() {
+      if (!SpeechRecognition) return null;
+      if (recog) return recog;
 
-    // Case 3: restart/resegmentation
-    // IMPORTANT: only dedupe/overlap within the current segment (since last Resume/Start),
-    // so legitimate repetition across segments (e.g. "...ça va" then "Ça va bien") is preserved.
-    const segmentText = committedText.slice(segmentStart);
-    const segmentNorm = normalize(segmentText);
+      recog = new SpeechRecognition();
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.maxAlternatives = 1;
 
-    // If the segment already ends with this hypothesis, it's a duplicate within this segment
-    if (segmentNorm && segmentNorm.endsWith(hyp)) {
-      lastFinalHypothesis = hyp;
-      return;
-    }
+      recog.onresult = (event) => {
+        let interim = "";
 
-    // Overlap only against segment text
-    const ov = overlapSuffixPrefix(segmentNorm, hyp);
-    const tail = normalize(hyp.slice(ov));
-    if (tail) committedText += ensureSpace(committedText) + tail;
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          const t = r[0]?.transcript ?? "";
+          if (!t) continue;
 
-    lastFinalHypothesis = hyp;
-  }
-
-
-  function ensureRecognition() {
-    if (!SpeechRecognition) return null;
-    if (recog) return recog;
-
-    recog = new SpeechRecognition();
-    recog.continuous = true;
-    recog.interimResults = true;
-    recog.maxAlternatives = 1;
-
-    recog.onresult = (event) => {
-      let interim = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const r = event.results[i];
-        const t = r[0]?.transcript ?? "";
-        if (!t) continue;
-
-        if (r.isFinal) {
-          appendDeltaFromFinal(t);
-        } else {
-          interim += t;
+          if (r.isFinal) appendDeltaFromFinal(t);
+          else interim += t;
         }
-      }
 
-      interimText = interim;
-      renderTranscript();
-    };
+        interimText = interim;
+        renderTranscript();
+      };
 
-    recog.onerror = (e) => setStatus(`Recognition error: ${e.error}`);
+      recog.onerror = (e) => setStatus(`Recognition error: ${e.error}`);
 
-    recog.onend = () => {
-      if (recState === "listening" && !manualEnd) {
-        setTimeout(() => {
-          if (recState === "listening") {
-            try { recog.start(); } catch (_) {}
-          }
-        }, 150);
-      }
-      manualEnd = false;
-    };
+      recog.onend = () => {
+        if (recState === "listening" && !manualEnd) {
+          setTimeout(() => {
+            if (recState === "listening") {
+              try { recog.start(); } catch (_) {}
+            }
+          }, 150);
+        }
+        manualEnd = false;
+      };
 
-    return recog;
-  }
-
-  function startRecognition({ clear }) {
-    const r = ensureRecognition();
-    if (!r) {
-      setStatus("Speech recognition not supported in this browser. Use MediaRecorder+server fallback for full mobile support.");
-      return;
+      return recog;
     }
 
-    r.lang = langEl.value;
+    function startRecognition({ clear }) {
+      const r = ensureRecognition();
+      if (!r) {
+        setStatus("Speech recognition not supported in this browser.");
+        return;
+      }
 
-    if (clear) {
+      r.lang = langEl.value;
+
+      if (clear) {
+        committedText = "";
+        interimText = "";
+        lastFinalHypothesis = "";
+        segmentStart = 0;
+        renderTranscript();
+      } else {
+        // If user edited manually, sync once
+        if (!textEl.readOnly) {
+          committedText = normalize(textEl.value);
+          interimText = "";
+          renderTranscript();
+        }
+
+        // Ensure separation before new words after resume
+        if (committedText && !/\s$/.test(committedText)) {
+          committedText += " ";
+          renderTranscript();
+        }
+
+        // New segment boundary (allows repeats like "...ça va" then "Ça va bien")
+        segmentStart = committedText.length;
+        lastFinalHypothesis = "";
+      }
+
+      // Re-enable autoscroll following on Start/Resume
+      userPinnedToBottom = true;
+
+      recState = "listening";
+      manualEnd = false;
+      setStatus("Listening…");
+      try { r.start(); } catch (_) {}
+    }
+
+    function pauseRecognition() {
+      if (!recog) return;
+      manualEnd = true;
+      try { recog.stop(); } catch (_) {}
+      recState = "idle";
+      interimText = "";
+      renderTranscript();
+      setStatus("Paused.");
+    }
+
+    function stopRecognitionAndClear() {
+      if (recog) {
+        manualEnd = true;
+        try { recog.stop(); } catch (_) {}
+      }
+      recState = "idle";
       committedText = "";
       interimText = "";
       lastFinalHypothesis = "";
       segmentStart = 0;
       renderTranscript();
-    } else {
-      if (!textEl.readOnly) {
-        committedText = normalize(textEl.value);
-        interimText = "";
-        renderTranscript();
+      setStatus("Stopped. Cleared.");
+      shouldClearOnNextStart = true;
+      userPinnedToBottom = true;
+    }
+
+    // ---------- Speech Synthesis ----------
+    let currentUtterance = null;
+
+    function getSelectedOrAllText() {
+      const start = textEl.selectionStart;
+      const end = textEl.selectionEnd;
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        return textEl.value.slice(start, end);
       }
-
-      if (committedText && !/\s$/.test(committedText)) {
-        committedText += " ";
-        renderTranscript();
-      }
-
-      segmentStart = committedText.length;
-      lastFinalHypothesis = "";
+      return textEl.value;
     }
 
-    userPinnedToBottom = true;
+    function speakText(text) {
+      if (!text.trim()) return;
 
-    recState = "listening";
-    manualEnd = false;
-    setStatus("Listening…");
-    try { r.start(); } catch (_) {}
-  }
+      window.speechSynthesis.cancel();
 
-  function pauseRecognition() {
-    if (!recog) return;
-    manualEnd = true;
-    try { recog.stop(); } catch (_) {}
-    recState = "idle";
-    interimText = "";
-    // Keep lastFinalHypothesis so resume continues deltas safely
-    renderTranscript();
-    setStatus("Paused.");
-  }
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = langEl.value;
 
- function stopRecognitionAndClear() {
-  if (recog) {
-    manualEnd = true;
-    try { recog.stop(); } catch (_) {}
-  }
-  recState = "idle";
-  committedText = "";
-  interimText = "";
-  lastFinalHypothesis = "";
-  segmentStart = 0;          // ✅ add this
-  renderTranscript();
-  setStatus("Stopped. Cleared.");
-  shouldClearOnNextStart = true;
-  userPinnedToBottom = true; // ✅ optional but recommended (follow again next time)
-}
+      u.onend = () => {
+        currentUtterance = null;
+        playBtn.textContent = "PLAY";
+        setStatus(recState === "listening" ? "Listening…" : "Idle.");
+      };
+      u.onerror = () => {
+        currentUtterance = null;
+        playBtn.textContent = "PLAY";
+        setStatus("TTS error.");
+      };
 
-  // ---------- Speech Synthesis ----------
-  let currentUtterance = null;
-
-  function getSelectedOrAllText() {
-    const start = textEl.selectionStart;
-    const end = textEl.selectionEnd;
-    if (typeof start === "number" && typeof end === "number" && end > start) {
-      return textEl.value.slice(start, end);
-    }
-    return textEl.value;
-  }
-
-  function speakText(text) {
-    if (!text.trim()) return;
-
-    window.speechSynthesis.cancel();
-
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = langEl.value;
-
-    u.onend = () => {
-      currentUtterance = null;
-      playBtn.textContent = "PLAY";
-      setStatus(recState === "listening" ? "Listening…" : "Idle.");
-    };
-    u.onerror = () => {
-      currentUtterance = null;
-      playBtn.textContent = "PLAY";
-      setStatus("TTS error.");
-    };
-
-    currentUtterance = u;
-    playBtn.textContent = "STOP";
-    setStatus("Speaking…");
-    window.speechSynthesis.speak(u);
-  }
-
-  // ---------- Buttons ----------
-  startBtn.onclick = () => {
-    const clear = shouldClearOnNextStart;
-    shouldClearOnNextStart = false;
-    startRecognition({ clear });
-  };
-
-  stopBtn.onclick = () => {
-    stopRecognitionAndClear();
-
-    window.speechSynthesis.cancel();
-    currentUtterance = null;
-    playBtn.textContent = "PLAY";
-  };
-
-  pauseBtn.onclick = () => {
-    if (recState === "listening") pauseRecognition();
-
-    if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-      window.speechSynthesis.pause();
-      setStatus("Paused.");
-    } else if (recState !== "listening") {
-      setStatus("Paused.");
-    }
-  };
-
-  resumeBtn.onclick = () => {
-    if (recState !== "listening") startRecognition({ clear: false });
-
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
+      currentUtterance = u;
+      playBtn.textContent = "STOP";
       setStatus("Speaking…");
+      window.speechSynthesis.speak(u);
     }
-  };
 
-  playBtn.onclick = () => {
-    if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
+    // ---------- Buttons ----------
+    startBtn.onclick = () => {
+      const clear = shouldClearOnNextStart;
+      shouldClearOnNextStart = false;
+      startRecognition({ clear });
+    };
+
+    stopBtn.onclick = () => {
+      stopRecognitionAndClear();
       window.speechSynthesis.cancel();
       currentUtterance = null;
       playBtn.textContent = "PLAY";
-      setStatus(recState === "listening" ? "Listening…" : "Idle.");
-      return;
-    }
-    speakText(getSelectedOrAllText());
-  };
+    };
 
-  // ---------- Edit toggle ----------
-  let editing = false;
-  editToggle.onclick = () => {
-    editing = !editing;
-    textEl.readOnly = !editing;
-    editState.textContent = editing ? "ON" : "OFF";
+    pauseBtn.onclick = () => {
+      if (recState === "listening") pauseRecognition();
 
-    // optional: stop recognition while editing
-    if (editing && recState === "listening") {
-      pauseRecognition();
-    }
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        setStatus("Paused.");
+      } else if (recState !== "listening") {
+        setStatus("Paused.");
+      }
+    };
 
-    if (editing) textEl.focus();
-  };
+    resumeBtn.onclick = () => {
+      if (recState !== "listening") startRecognition({ clear: false });
 
-  // ---------- Init ----------
-  setStatus("Idle.");
-})();
-</script>
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setStatus("Speaking…");
+      }
+    };
 
+    playBtn.onclick = () => {
+      if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
+        window.speechSynthesis.cancel();
+        currentUtterance = null;
+        playBtn.textContent = "PLAY";
+        setStatus(recState === "listening" ? "Listening…" : "Idle.");
+        return;
+      }
+      speakText(getSelectedOrAllText());
+    };
 
+    // ---------- Edit toggle ----------
+    let editing = false;
+    editToggle.onclick = () => {
+      editing = !editing;
+      textEl.readOnly = !editing;
+      editState.textContent = editing ? "ON" : "OFF";
+
+      // Optional: stop recognition while editing
+      if (editing && recState === "listening") {
+        pauseRecognition();
+      }
+
+      if (editing) textEl.focus();
+    };
+
+    // ---------- Init ----------
+    setStatus("Idle.");
+  })();
+  </script>
 </body>
 </html>
