@@ -255,7 +255,7 @@
   <!-- Empty state overlay -->
   <div id="emptyState" aria-hidden="true">
     <img src="./micro.png" alt="" />
-    <div class="emptyText">Your speech blooms here.</div>
+    <div class="emptyText">Your speech blooms here</div>
   </div>
 
   <textarea id="text" readonly></textarea>
@@ -336,8 +336,51 @@
 
     let manualEnd = false;
 
-    let lastFinalHypothesis = "";
+    let lastFinalCanonTokens = [];
     let segmentStart = 0;                  // boundary to allow repeats across Pause/Resume
+
+    function rawTokens(s) {
+  return (s || "").trim().split(/\s+/).filter(Boolean);
+}
+
+function canonToken(t) {
+  return (t || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function canonTokensFromText(s) {
+  return rawTokens(s).map(canonToken).filter(Boolean);
+}
+
+
+function startsWithTokens(full, prefix) {
+  if (prefix.length > full.length) return false;
+  for (let i = 0; i < prefix.length; i++) if (full[i] !== prefix[i]) return false;
+  return true;
+}
+
+function endsWithTokens(full, suffix) {
+  if (suffix.length > full.length) return false;
+  const off = full.length - suffix.length;
+  for (let i = 0; i < suffix.length; i++) if (full[off + i] !== suffix[i]) return false;
+  return true;
+}
+
+function overlapTokenCount(full, next) {
+  const max = Math.min(full.length, next.length);
+  for (let k = max; k > 0; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      if (full[full.length - k + i] !== next[i]) { ok = false; break; }
+    }
+    if (ok) return k;
+  }
+  return 0;
+}
+
 
     function normalize(s) {
       return (s || "").replace(/\s+/g, " ").trim();
@@ -348,7 +391,7 @@
         const doCommit = () => {
           committedText = textEl.value;  // raw edits
           interimText = "";
-          lastFinalHypothesis = "";
+          lastFinalCanonTokens = [];
           segmentStart = committedText.length;
           renderTranscript();
           resolve();
@@ -377,46 +420,44 @@
     }
 
 
-    function overlapSuffixPrefix(a, b) {
-      const max = Math.min(a.length, b.length);
-      for (let k = max; k > 0; k--) {
-        if (a.slice(-k) === b.slice(0, k)) return k;
-      }
-      return 0;
-    }
-
     function appendDeltaFromFinal(finalTextRaw) {
-      const hyp = normalize(finalTextRaw);
-      if (!hyp) return;
-
-      const prev = lastFinalHypothesis;
-
-      // Growing prefix within the current stream
-      if (prev && hyp.startsWith(prev)) {
-        const delta = normalize(hyp.slice(prev.length));
-        if (delta) committedText += ensureSpace(committedText) + delta;
-        lastFinalHypothesis = hyp;
+      const hypRaw = rawTokens(finalTextRaw);
+      if (hypRaw.length === 0) return;
+    
+      const hypCanon = hypRaw.map(canonToken).filter(Boolean);
+      const prevCanon = lastFinalCanonTokens;
+    
+      // 1) Growing prefix within the current stream (token-based, case/punct/accents tolerant)
+      if (prevCanon.length > 0 && startsWithTokens(hypCanon, prevCanon)) {
+        const tailRaw = hypRaw.slice(prevCanon.length).join(" ");
+        if (tailRaw) committedText += ensureSpace(committedText) + tailRaw;
+        lastFinalCanonTokens = hypCanon;
         return;
       }
-
-      // Regression; ignore
-      if (prev && prev.startsWith(hyp)) return;
-
-      // Restart/resegmentation: only dedupe/overlap within this segment
+    
+      // 2) Regression: ignore
+      if (prevCanon.length > 0 && startsWithTokens(prevCanon, hypCanon)) {
+        return;
+      }
+    
+      // 3) Restart/resegmentation: dedupe only within the current segment, canonically
       const segmentText = committedText.slice(segmentStart);
-      const segmentNorm = normalize(segmentText);
-
-      if (segmentNorm && segmentNorm.endsWith(hyp)) {
-        lastFinalHypothesis = hyp;
+      const segCanon = canonTokensFromText(segmentText);
+    
+      // If the segment already ends with this hypothesis, it's a duplicate
+      if (segCanon.length > 0 && endsWithTokens(segCanon, hypCanon)) {
+        lastFinalCanonTokens = hypCanon;
         return;
       }
-
-      const ov = overlapSuffixPrefix(segmentNorm, hyp);
-      const tail = normalize(hyp.slice(ov));
-      if (tail) committedText += ensureSpace(committedText) + tail;
-
-      lastFinalHypothesis = hyp;
+    
+      // Otherwise append only the non-overlapping tail (token overlap)
+      const ov = overlapTokenCount(segCanon, hypCanon);
+      const tailRaw = hypRaw.slice(ov).join(" ");
+      if (tailRaw) committedText += ensureSpace(committedText) + tailRaw;
+    
+      lastFinalCanonTokens = hypCanon;
     }
+
 
     function ensureRecognition() {
       if (!SpeechRecognition) return null;
@@ -471,7 +512,7 @@
       if (clear) {
         committedText = "";
         interimText = "";
-        lastFinalHypothesis = "";
+        lastFinalCanonTokens = [];
         segmentStart = 0;
         renderTranscript();
       } else {
@@ -487,7 +528,7 @@
 
         // New segment boundary (allows repeats like "...ça va" then "Ça va bien")
         segmentStart = committedText.length;
-        lastFinalHypothesis = "";
+        lastFinalCanonTokens = [];
       }
 
       // Re-enable autoscroll following on Start/Resume
@@ -517,7 +558,7 @@
       recState = "idle";
       committedText = "";
       interimText = "";
-      lastFinalHypothesis = "";
+      lastFinalCanonTokens = [];
       segmentStart = 0;
       renderTranscript();
       setStatus("Stopped. Cleared.");
