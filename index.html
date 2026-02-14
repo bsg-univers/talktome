@@ -201,6 +201,20 @@
   color: rgba(59,45,49,0.85); /* your theme text */
 }
 
+/* Special style for PLAY button */
+#playBtn {
+  background: var(--bg);   /* same pink as app background */
+  color: var(--btn);       /* brown text */
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+/* Optional: slightly darker on press */
+#playBtn:active {
+  filter: brightness(0.97);
+}
+
+
   </style>
 </head>
 
@@ -241,7 +255,7 @@
   <!-- Empty state overlay -->
   <div id="emptyState" aria-hidden="true">
     <img src="./micro.png" alt="" />
-    <div class="emptyText">Your text blooms here!</div>
+    <div class="emptyText">Your text blooms here.</div>
   </div>
 
   <textarea id="text" readonly></textarea>
