@@ -113,6 +113,7 @@
       border-radius: 12px;
       overflow: hidden;
       background: #fff;
+      position: relative;
 
       flex: 1 1 auto;
       min-height: 0;
@@ -156,6 +157,21 @@
 
       -webkit-overflow-scrolling: touch;
     }
+textarea {
+  -webkit-text-size-adjust: 100%;
+}
+
+textarea::-webkit-spellcheck-marker {
+  display: none;
+}
+
+#emptyState img {
+  width: 120px;
+  height: auto;
+  opacity: 0.9;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 
     /* Mobile tweaks */
     @media (max-width: 600px) {
@@ -180,14 +196,20 @@
 
 #emptyState{
   position:absolute;
-  inset: 52px 0 0 0; /* below the header; adjust if your header height differs */
+  top:52px;
+  left:0;
+  right:0;
+  bottom:0;
+
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  gap: 14px;
+  gap:14px;
+
   pointer-events:none;
-  opacity: 0.9;
+  opacity:0.9;
+  z-index:2;
 }
 
 #emptyState img{
@@ -227,6 +249,22 @@
         <option value="en-GB">English (UK)</option>
         <option value="es-ES">Español</option>
         <option value="de-DE">Deutsch</option>
+        <option value="pt-PT">Português</option>
+        <option value="it-IT">Italiano</option>
+        <option value="uk-UA">Українська</option>
+        <option value="da-DK">Dansk</option>
+        <option value="nl-NL">Nederlands</option>
+        <option value="nb-NO">Norsk</option>
+        <option value="fi-FI">Suomi</option>
+        <option value="pl-PL">Polski</option>
+        <option value="cs-CZ">Čeština</option>
+        <option value="ja-JP">日本語</option>
+        <option value="zh-CN">中文 (简体)</option>
+        <option value="vi-VN">Tiếng Việt</option>
+        <option value="ko-KR">한국어</option> 
+        <option value="ar-SA">العربية</option>
+        <option value="ro-RO">Română</option>
+        <option value="ru-RU">Русский</option>
       </select>
     </div>
 
@@ -254,11 +292,18 @@
 
   <!-- Empty state overlay -->
   <div id="emptyState" aria-hidden="true">
-    <img src="./micro.png" alt="" />
+    <img src="./micro.png" alt="" draggable="false" />
     <div class="emptyText">Your speech blooms here</div>
   </div>
 
-  <textarea id="text" readonly></textarea>
+  <textarea 
+    id="text" 
+    readonly
+    spellcheck="false"
+    autocorrect="off"
+    autocomplete="off"
+    autocapitalize="off"
+  ></textarea>
 </div>
 
   </div>
@@ -464,9 +509,11 @@ function overlapTokenCount(full, next) {
       if (recog) return recog;
 
       recog = new SpeechRecognition();
+      recog.lang = langEl.value;
       recog.continuous = true;
       recog.interimResults = true;
       recog.maxAlternatives = 1;
+      
 
       recog.onresult = (event) => {
         let interim = "";
@@ -661,18 +708,29 @@ resumeBtn.onclick = async () => {
 
     // ---------- Edit toggle ----------
     let editing = false;
-    editToggle.onclick = () => {
+    editToggle.onclick = async () => {
       editing = !editing;
-      textEl.readOnly = !editing;
-      editState.textContent = editing ? "ON" : "OFF";
     
       if (editing) {
-        // Optional: stop recognition while editing
         if (recState === "listening") pauseRecognition();
-        textEl.focus();
+    
+        textEl.readOnly = false;
+        editState.textContent = "ON";
+    
+        // iOS fix: attendre 1 frame avant focus
+        requestAnimationFrame(() => {
+          textEl.focus();
+          textEl.setSelectionRange(textEl.value.length, textEl.value.length);
+        });
+    
       } else {
-        commitTextareaToCommitted();
+        textEl.blur();
+        await commitTextareaToCommitted();
+        textEl.readOnly = true;
+        editState.textContent = "OFF";
       }
+    
+      updateEmptyState();
     };
 
 
