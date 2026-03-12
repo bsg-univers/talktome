@@ -518,11 +518,14 @@ function overlapTokenCount(full, next) {
       
 
       recog.onresult = (event) => {
-        let interim = "";
 
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const r = event.results[i];
-          const t = r[0]?.transcript ?? "";
+          if (recState !== "listening") return;
+        
+          let interim = "";
+        
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const r = event.results[i];
+            const t = r[0]?.transcript ?? "";
           if (!t) continue;
 
           if (r.isFinal) appendDeltaFromFinal(t);
@@ -591,10 +594,16 @@ function overlapTokenCount(full, next) {
 
     function pauseRecognition() {
       if (!recog) return;
+    
       manualEnd = true;
+    
+      recState = "idle";   // <- déplacer AVANT stop()
+    
       try { recog.stop(); } catch (_) {}
-      recState = "idle";
+    
       interimText = "";
+      lastFinalCanonTokens = [];
+    
       renderTranscript();
       setStatus("Paused.");
     }
