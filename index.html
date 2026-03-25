@@ -469,44 +469,29 @@ function overlapTokenCount(full, next) {
     }
 
 
-    function appendDeltaFromFinal(finalTextRaw) {
-      const hypRaw = rawTokens(finalTextRaw);
-      if (hypRaw.length === 0) return;
-    
-      const hypCanon = hypRaw.map(canonToken).filter(Boolean);
-      const prevCanon = lastFinalCanonTokens;
-    
-      // 1) Growing prefix within the current stream (token-based, case/punct/accents tolerant)
-      if (prevCanon.length > 0 && startsWithTokens(hypCanon, prevCanon)) {
-        const tailRaw = hypRaw.slice(prevCanon.length).join(" ");
-        if (tailRaw) committedText += ensureSpace(committedText) + tailRaw;
-        lastFinalCanonTokens = hypCanon;
-        return;
-      }
-    
-      // 2) Regression: ignore
-      if (prevCanon.length > 0 && startsWithTokens(prevCanon, hypCanon)) {
-        return;
-      }
-    
-      // 3) Restart/resegmentation: dedupe only within the current segment, canonically
-      const segmentText = committedText.slice(segmentStart);
-      const segCanon = canonTokensFromText(segmentText);
-    
-      // If the segment already ends with this hypothesis, it's a duplicate
-      if (segCanon.length > 0 && endsWithTokens(segCanon, hypCanon)) {
-        lastFinalCanonTokens = hypCanon;
-        return;
-      }
-    
-      // Otherwise append only the non-overlapping tail (token overlap)
-      const ov = overlapTokenCount(segCanon, hypCanon);
-      const tailRaw = hypRaw.slice(ov).join(" ");
-      if (tailRaw) committedText += ensureSpace(committedText) + tailRaw;
-    
-      lastFinalCanonTokens = hypCanon;
-    }
+let lastFinalText = "";
 
+function appendDeltaFromFinal(finalTextRaw) {
+  const finalText = normalize(finalTextRaw);
+  if (!finalText) return;
+
+  // Si c'est exactement le même résultat → ignorer
+  if (finalText === lastFinalText) return;
+
+  // Si le moteur renvoie une version plus longue du même texte
+  if (finalText.startsWith(lastFinalText)) {
+    const addition = finalText.slice(lastFinalText.length).trim();
+    if (addition) {
+      committedText += ensureSpace(committedText) + addition;
+    }
+  } 
+  // Si le moteur redémarre une phrase (cas fréquent sur Android)
+  else if (!lastFinalText.startsWith(finalText)) {
+    committedText += ensureSpace(committedText) + finalText;
+  }
+
+  lastFinalText = finalText;
+}
 
     function ensureRecognition() {
       if (!SpeechRecognition) return null;
@@ -560,6 +545,7 @@ function overlapTokenCount(full, next) {
         setStatus("Speech recognition not supported in this browser.");
         return;
       }
+      lastFinalText = "";
 
       r.lang = langEl.value;
 
