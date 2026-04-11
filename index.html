@@ -313,211 +313,304 @@ textarea::-webkit-spellcheck-marker {
   </div>
 
 <script>
-(() => {
-  // ---------- UI ----------
-  const langEl = document.getElementById('lang');
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-  const playBtn = document.getElementById('playBtn');
-  const pauseBtn = document.getElementById('pauseBtn');
-  const resumeBtn = document.getElementById('resumeBtn');
-  const statusEl = document.getElementById('status');
-  const textEl = document.getElementById('text');
-  const editToggle = document.getElementById('editToggle');
-  const editState = document.getElementById('editState');
-  const emptyStateEl = document.getElementById("emptyState");
+  (() => {
+    // ---------- UI ----------
+    const langEl = document.getElementById('lang');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const statusEl = document.getElementById('status');
+    const textEl = document.getElementById('text');
+    const editToggle = document.getElementById('editToggle');
+    const editState = document.getElementById('editState');
+    const emptyStateEl = document.getElementById("emptyState");
 
-  let isComposing = false;
+    let isComposing = false;
+    let committedText = "";
+    let interimText = "";
+    let lastFinalText = "";
+    let recState = "idle";
+    let shouldClearOnNextStart = true;
+    let manualEnd = false;
+    let userPinnedToBottom = true;
 
-  textEl.addEventListener("compositionstart", () => { isComposing = true; });
-  textEl.addEventListener("compositionend", () => { isComposing = false; });
-
-  let committedText = "";
-  let interimText = "";
-
-  let recog = null;
-  let recState = "idle";
-  let manualEnd = false;
-
-  let lastFinalText = "";          // 🔥 FIX duplicate detection stronger
-  let restartCooldown = false;     // 🔥 FIX first-word loss
-
-  function setStatus(m){ statusEl.textContent = m; }
-
-  function normalize(s){
-    return (s || "")
-      .replace(/\s+/g,' ')
-      .replace(/[’]/g,"'") // unify apostrophes
-      .trim();
-  }
-
-  function render(){
-    textEl.value = (committedText + interimText).trimStart();
-    updateEmptyState();
-  }
-
-  function updateEmptyState(){
-    const hasText = normalize(textEl.value).length > 0;
-    emptyStateEl.style.display = (!hasText && textEl.readOnly) ? "flex" : "none";
-  }
-
-  // ---------- TOKEN HELPERS ----------
-  function canon(s){
-    return normalize(s)
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s']/gu,'')
-      .split(/\s+/)
-      .filter(Boolean);
-  }
-
-  function overlap(a,b){
-    const max = Math.min(a.length,b.length);
-    for(let k=max;k>0;k--){
-      let ok=true;
-      for(let i=0;i<k;i++){
-        if(a[a.length-k+i]!==b[i]){ok=false;break;}
+    textEl.addEventListener("compositionstart", () => { isComposing = true; });
+    textEl.addEventListener("compositionend", () => { isComposing = false; });
+    
+    textEl.addEventListener("input", () => {
+      if (!textEl.readOnly) {
+        committedText = textEl.value;
       }
-      if(ok) return k;
-    }
-    return 0;
-  }
+    });
 
-  function appendFinal(raw){
-    const t = normalize(raw);
-    if(!t) return;
-
-    // 🔥 HARD FIX: prevent duplicate emission
-    if(t === lastFinalText) return;
-
-    const prev = canon(lastFinalText);
-    const next = canon(t);
-
-    const shared = overlap(prev,next);
-
-    let addition = t;
-
-    if(shared > 0){
-      addition = next.slice(shared).join(" ");
+    function updateEmptyState() {
+      const hasText = normalize(textEl.value).length > 0;
+      const show = !hasText && textEl.readOnly;
+      emptyStateEl.style.display = show ? "flex" : "none";
     }
 
-    // avoid empty append
-    if(addition.trim()){
-      committedText += (committedText ? " " : "") + addition;
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      });
     }
 
-    lastFinalText = t;
-  }
+    function isNearBottom(el, threshold = 24) {
+      return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
+    }
 
-  // ---------- SPEECH API ----------
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    textEl.addEventListener("scroll", () => {
+      userPinnedToBottom = isNearBottom(textEl);
+    });
 
-  function ensureRec(){
-    if(recog) return recog;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recog = null;
 
-    recog = new SpeechRecognition();
-    recog.lang = langEl.value;
-    recog.continuous = true;
-    recog.interimResults = true;
+    // --- Fonctions de nettoyage pour éviter les doublons avec apostrophes ---
+    function normalize(s) {
+      return (s || "").replace(/\s+/g, " ").trim();
+    }
 
-    recog.onresult = (e) => {
-      if(recState !== "listening") return;
+    function cleanForComparison(s) {
+      // Enlève ponctuation, apostrophes et met en minuscule pour comparer le contenu pur
+      return s.toLowerCase()
+              .replace(/['’'"`.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+              .replace(/\s+/g, "")
+              .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
 
-      let interim = "";
+    function appendDeltaFromFinal(finalTextRaw) {
+      const finalText = normalize(finalTextRaw);
+      if (!finalText) return;
 
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        const r = e.results[i];
-        const t = r[0]?.transcript || "";
+      const cleanNew = cleanForComparison(finalText);
+      const cleanLast = cleanForComparison(lastFinalText);
 
-        if(r.isFinal){
-          appendFinal(t);
-        } else {
-          interim += t;
+      // Si le nouveau texte contient l'ancien (cas Android progressif)
+      if (cleanLast && cleanNew.startsWith(cleanLast)) {
+        const addition = finalText.slice(lastFinalText.length).trim();
+        if (addition) {
+          // On vérifie si l'addition ne commence pas par une apostrophe collée
+          const space = (committedText.length > 0 && !/[\s'’]/.test(committedText.slice(-1))) ? " " : "";
+          committedText += space + addition;
         }
+      } 
+      // Si c'est un tout nouveau bloc de texte
+      else if (cleanNew !== cleanLast) {
+        const space = (committedText.length > 0 && !/[\s'’]/.test(committedText.slice(-1))) ? " " : "";
+        committedText += space + finalText;
       }
 
-      interimText = interim;
-      render();
-    };
+      lastFinalText = finalText;
+    }
 
-    recog.onend = () => {
-      // 🔥 FIX: avoid immediate restart glitch (first-word loss)
-      if(recState === "listening" && !manualEnd){
-        setTimeout(() => {
-          try {
-            restartCooldown = true;
-            recog.start();
-            setTimeout(()=> restartCooldown=false, 200);
-          } catch(e){}
-        }, 250);
+    function renderTranscript() {
+      const shouldStick = userPinnedToBottom && textEl.readOnly;
+      textEl.value = (committedText + interimText).trimStart();
+      if (shouldStick) textEl.scrollTop = textEl.scrollHeight;
+      updateEmptyState();
+    }
+
+    async function commitTextareaToCommitted() {
+      return new Promise((resolve) => {
+        const doCommit = () => {
+          committedText = textEl.value;
+          interimText = "";
+          lastFinalText = "";
+          renderTranscript();
+          resolve();
+        };
+        if (document.activeElement === textEl) textEl.blur();
+        setTimeout(doCommit, 50);
+      });
+    }
+
+    function ensureRecognition() {
+      if (!SpeechRecognition) return null;
+      if (recog) return recog;
+
+      recog = new SpeechRecognition();
+      recog.lang = langEl.value;
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.maxAlternatives = 1;
+
+      recog.onresult = (event) => {
+        if (recState !== "listening") return;
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          const t = r[0]?.transcript ?? "";
+          if (!t) continue;
+          if (r.isFinal) appendDeltaFromFinal(t);
+          else interim += t;
+        }
+        interimText = interim;
+        renderTranscript();
+      };
+
+      recog.onerror = (e) => {
+        if (e.error === 'no-speech') return;
+        setStatus(`Error: ${e.error}`);
+      };
+
+      recog.onend = () => {
+        if (recState === "listening" && !manualEnd) {
+          try { recog.start(); } catch (_) {}
+        }
+        manualEnd = false;
+      };
+
+      return recog;
+    }
+
+    function startRecognition({ clear }) {
+      const r = ensureRecognition();
+      if (!r) {
+        setStatus("Not supported.");
+        return;
       }
+      
+      lastFinalText = "";
+      r.lang = langEl.value;
+
+      if (clear) {
+        committedText = "";
+        interimText = "";
+        renderTranscript();
+      }
+
+      userPinnedToBottom = true;
+      recState = "listening";
       manualEnd = false;
-    };
+      
+      setStatus("Starting..."); // Indique que le moteur chauffe
+      
+      try { 
+        r.start(); 
+        // Petit délai pour laisser le micro s'ouvrir réellement avant de parler
+        setTimeout(() => { if(recState === "listening") setStatus("Listening..."); }, 400);
+      } catch (_) {
+        setStatus("Listening...");
+      }
+    }
 
-    recog.onerror = (e) => setStatus("Error: " + e.error);
+    function pauseRecognition() {
+      if (!recog) return;
+      manualEnd = true;
+      recState = "idle";
+      try { recog.stop(); } catch (_) {}
+      interimText = "";
+      renderTranscript();
+      setStatus("Paused.");
+    }
 
-    return recog;
-  }
-
-  function start(clear){
-    const r = ensureRec();
-
-    if(clear){
+    function stopRecognitionAndClear() {
+      if (recog) {
+        manualEnd = true;
+        try { recog.stop(); } catch (_) {}
+      }
+      recState = "idle";
       committedText = "";
       interimText = "";
       lastFinalText = "";
+      renderTranscript();
+      setStatus("⋆.˚ ☾⭒.˚");
+      shouldClearOnNextStart = true;
     }
 
-    // 🔥 FIX: warm-up trick (prevents first word loss)
-    try{
-      r.start();
-      setTimeout(()=>{ try{ r.stop(); }catch(e){} }, 120);
-      setTimeout(()=>{ try{ r.start(); }catch(e){} }, 300);
-    }catch(e){}
-
-    recState = "listening";
-    manualEnd = false;
-    setStatus("Listening...");
-  }
-
-  function pause(){
-    if(!recog) return;
-    manualEnd = true;
-    recState = "idle";
-    try{ recog.stop(); }catch(e){}
-
-    interimText = "";
-    render();
-    setStatus("Paused");
-  }
-
-  function stop(){
-    if(recog){
-      manualEnd = true;
-      try{ recog.stop(); }catch(e){}
+    // ---------- TTS ----------
+    function getSelectedOrAllText() {
+      const start = textEl.selectionStart;
+      const end = textEl.selectionEnd;
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        return textEl.value.slice(start, end);
+      }
+      return textEl.value;
     }
 
-    recState = "idle";
-    committedText = "";
-    interimText = "";
-    lastFinalText = "";
+    function speakText(text) {
+      if (!text.trim()) return;
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = langEl.value;
+      u.onend = () => {
+        playBtn.textContent = "PLAY";
+        setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
+      };
+      playBtn.textContent = "STOP";
+      setStatus("Speaking...");
+      window.speechSynthesis.speak(u);
+    }
 
-    render();
-    setStatus("Idle");
-  }
+    // ---------- Events ----------
+    startBtn.onclick = async () => {
+      const clear = shouldClearOnNextStart;
+      shouldClearOnNextStart = false;
+      if (!textEl.readOnly) await commitTextareaToCommitted();
+      startRecognition({ clear });
+    };
 
-  // ---------- BUTTONS ----------
-  startBtn.onclick = () => start(true);
-  stopBtn.onclick = () => stop();
-  pauseBtn.onclick = () => pause();
+    stopBtn.onclick = () => {
+      stopRecognitionAndClear();
+      window.speechSynthesis.cancel();
+      playBtn.textContent = "PLAY";
+    };
 
-  resumeBtn.onclick = () => {
-    start(false);
-  };
+    pauseBtn.onclick = () => {
+      if (recState === "listening") pauseRecognition();
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.pause();
+        setStatus("Paused.");
+      }
+    };
 
-  setStatus("Ready");
-  render();
+    resumeBtn.onclick = async () => {
+      if (!textEl.readOnly) await commitTextareaToCommitted();
+      if (recState !== "listening") startRecognition({ clear: false });
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setStatus("Speaking...");
+      }
+    };
 
-})();
+    playBtn.onclick = () => {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        playBtn.textContent = "PLAY";
+        setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
+        return;
+      }
+      speakText(getSelectedOrAllText());
+    };
+
+    editToggle.onclick = async () => {
+      const wasListening = (recState === "listening");
+      if (!textEl.readOnly) {
+        // Closing Edit Mode
+        await commitTextareaToCommitted();
+        textEl.readOnly = true;
+        editState.textContent = "OFF";
+      } else {
+        // Opening Edit Mode
+        if (wasListening) pauseRecognition();
+        textEl.readOnly = false;
+        editState.textContent = "ON";
+        requestAnimationFrame(() => {
+          textEl.focus();
+          textEl.setSelectionRange(textEl.value.length, textEl.value.length);
+        });
+      }
+      updateEmptyState();
+    };
+
+    setStatus("ᓚᘏᗢ");
+    updateEmptyState();
+  })();
 </script>
 </body>
 </html>
