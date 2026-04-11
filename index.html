@@ -534,6 +534,18 @@ textarea::-webkit-spellcheck-marker {
     hasStarted = true;
     updateEmptyState();
   
+    // 🔥 Si on est en mode édition → forcer OFF
+    if (!textEl.readOnly) {
+      textEl.blur();
+  
+      committedText = textEl.value;
+      interimText = "";
+      lastFinalCanonTokens = [];
+  
+      textEl.readOnly = true;
+      editState.textContent = "OFF";
+    }
+  
     setTimeout(() => {
       startRecognition({ clear: false });
     }, 120);
