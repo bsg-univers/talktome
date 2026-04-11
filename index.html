@@ -312,431 +312,216 @@ textarea::-webkit-spellcheck-marker {
 
   </div>
 
-  <script>
-  (() => {
-    // ---------- UI ----------
-    const langEl = document.getElementById('lang');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const playBtn = document.getElementById('playBtn');
-    const pauseBtn = document.getElementById('pauseBtn');
-    const resumeBtn = document.getElementById('resumeBtn');
-    const statusEl = document.getElementById('status');
-    const textEl = document.getElementById('text');
-    const editToggle = document.getElementById('editToggle');
-    const editState = document.getElementById('editState');
+<script>
+(() => {
+  const langEl = document.getElementById('lang');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resumeBtn = document.getElementById('resumeBtn');
+  const statusEl = document.getElementById('status');
+  const textEl = document.getElementById('text');
 
-    const emptyStateEl = document.getElementById("emptyState");
+  let committedText = "";
+  let interimText = "";
 
-    let isComposing = false;
+  let recState = "idle";
+  let manualEnd = false;
 
-    textEl.addEventListener("compositionstart", () => { isComposing = true; });
-    textEl.addEventListener("compositionend", () => { isComposing = false; });
-    
-    // Optional but helpful: while editing, keep committedText up-to-date as user types
-    textEl.addEventListener("input", () => {
-      if (!textEl.readOnly) {
-        // Don't renderTranscript() here (it would fight the user); just keep model in sync.
-        committedText = textEl.value;  // keep raw edits
-      }
-    });
+  let lastFinalCanonTokens = [];
 
+  let ignoreFirstResult = false;
+  let justResumedAt = 0;
 
-    function updateEmptyState() {
-      const hasText = normalize(textEl.value).length > 0;
-    
-      // Show only when empty AND not in edit mode (readOnly = true)
-      const show = !hasText && textEl.readOnly;
-    
-      emptyStateEl.style.display = show ? "flex" : "none";
-    }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null;
 
+  function setStatus(msg) { statusEl.textContent = msg; }
 
-
-    function setStatus(msg) { statusEl.textContent = msg; }
-
-    // ---------- PWA (GitHub Pages-safe) ----------
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
-      });
-    }
-
-    // ---------- Auto-scroll control ----------
-    let userPinnedToBottom = true;
-
-    function isNearBottom(el, threshold = 24) {
-      return (el.scrollHeight - el.scrollTop - el.clientHeight) < threshold;
-    }
-
-    textEl.addEventListener("scroll", () => {
-      userPinnedToBottom = isNearBottom(textEl);
-    });
-
-    // ---------- Speech Recognition (mobile-safe + resume-safe) ----------
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recog = null;
-
-    let recState = "idle";                 // "idle" | "listening"
-    let shouldClearOnNextStart = true;
-
-    let committedText = "";
-    let interimText = "";
-
-    let manualEnd = false;
-
-    let lastFinalCanonTokens = [];
-    let segmentStart = 0;                  // boundary to allow repeats across Pause/Resume
-
-    function rawTokens(s) {
-  return (s || "").trim().split(/\s+/).filter(Boolean);
-}
-
-function canonToken(t) {
-  return (t || "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "");
-}
-
-function canonTokensFromText(s) {
-  return rawTokens(s).map(canonToken).filter(Boolean);
-}
-
-
-function startsWithTokens(full, prefix) {
-  if (prefix.length > full.length) return false;
-  for (let i = 0; i < prefix.length; i++) if (full[i] !== prefix[i]) return false;
-  return true;
-}
-
-function endsWithTokens(full, suffix) {
-  if (suffix.length > full.length) return false;
-  const off = full.length - suffix.length;
-  for (let i = 0; i < suffix.length; i++) if (full[off + i] !== suffix[i]) return false;
-  return true;
-}
-
-function overlapTokenCount(full, next) {
-  const max = Math.min(full.length, next.length);
-  for (let k = max; k > 0; k--) {
-    let ok = true;
-    for (let i = 0; i < k; i++) {
-      if (full[full.length - k + i] !== next[i]) { ok = false; break; }
-    }
-    if (ok) return k;
-  }
-  return 0;
-}
-
-
-    function normalize(s) {
-      return (s || "").replace(/\s+/g, " ").trim();
-    }
-    
-    function commitTextareaToCommitted() {
-      return new Promise((resolve) => {
-        const doCommit = () => {
-          committedText = textEl.value;  // raw edits
-          interimText = "";
-          lastFinalCanonTokens = [];
-          segmentStart = committedText.length;
-          renderTranscript();
-          resolve();
-        };
-    
-        // Force IME to commit on mobile
-        if (document.activeElement === textEl) textEl.blur();
-    
-        // Wait a tiny moment (more reliable than 1 frame on many Android keyboards)
-        setTimeout(doCommit, 0);
-      });
-    }
-
-
-
-    function ensureSpace(base) {
-      return base.length > 0 && !/\s$/.test(base) ? " " : "";
-    }
-
-    function renderTranscript() {
-      const shouldStick = userPinnedToBottom && textEl.readOnly;
-      textEl.value = (committedText + interimText).trimStart();
-      if (shouldStick) textEl.scrollTop = textEl.scrollHeight;
-    
-      updateEmptyState();
-    }
-
-
-let lastFinalText = "";
-
-function appendDeltaFromFinal(finalTextRaw) {
-  const finalText = normalize(finalTextRaw);
-  if (!finalText) return;
-
-  // Si c'est exactement le même résultat → ignorer
-  if (finalText === lastFinalText) return;
-
-  // Si le moteur renvoie une version plus longue du même texte
-  if (finalText.startsWith(lastFinalText)) {
-    const addition = finalText.slice(lastFinalText.length).trim();
-    if (addition) {
-      committedText += ensureSpace(committedText) + addition;
-    }
-  } 
-  // Si le moteur redémarre une phrase (cas fréquent sur Android)
-  else if (!lastFinalText.startsWith(finalText)) {
-    committedText += ensureSpace(committedText) + finalText;
+  function normalize(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
   }
 
-  lastFinalText = finalText;
-}
+  function rawTokens(s) {
+    return (s || "").trim().split(/\s+/).filter(Boolean);
+  }
 
-    function ensureRecognition() {
-      if (!SpeechRecognition) return null;
-      if (recog) return recog;
+  function canonToken(t) {
+    return (t || "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+  }
 
-      recog = new SpeechRecognition();
-      recog.lang = langEl.value;
-      recog.continuous = true;
-      recog.interimResults = true;
-      recog.maxAlternatives = 1;
-      
+  function canonTokensFromText(s) {
+    return rawTokens(s).map(canonToken).filter(Boolean);
+  }
 
-      recog.onresult = (event) => {
+  function overlapTokenCount(full, next) {
+    const max = Math.min(full.length, next.length);
+    for (let k = max; k > 0; k--) {
+      let ok = true;
+      for (let i = 0; i < k; i++) {
+        if (full[full.length - k + i] !== next[i]) { ok = false; break; }
+      }
+      if (ok) return k;
+    }
+    return 0;
+  }
 
-          if (recState !== "listening") return;
-        
-          let interim = "";
-        
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const r = event.results[i];
-            const t = r[0]?.transcript ?? "";
-          if (!t) continue;
+  function ensureSpace(base) {
+    return base.length > 0 && !/\s$/.test(base) ? " " : "";
+  }
 
-          if (r.isFinal) appendDeltaFromFinal(t);
-          else interim += t;
-        }
+  function renderTranscript() {
+    textEl.value = (committedText + interimText).trimStart();
+  }
 
-        interimText = interim;
-        renderTranscript();
-      };
+  function appendDeltaFromFinal(finalTextRaw) {
+    const finalText = normalize(finalTextRaw);
+    if (!finalText) return;
 
-      recog.onerror = (e) => setStatus(`Recognition error: ${e.error}`);
+    const newTokens = canonTokensFromText(finalText);
+    const prevTokens = lastFinalCanonTokens;
 
-      recog.onend = () => {
-        if (recState === "listening" && !manualEnd) {
-          setTimeout(() => {
-            if (recState === "listening") {
-              try { recog.start(); } catch (_) {}
-            }
-          }, 150);
-        }
-        manualEnd = false;
-      };
+    const overlap = overlapTokenCount(prevTokens, newTokens);
+    const deltaTokens = newTokens.slice(overlap);
 
-      return recog;
+    if (deltaTokens.length > 0) {
+      const deltaText = rawTokens(finalText).slice(overlap).join(" ");
+      committedText += ensureSpace(committedText) + deltaText;
     }
 
-    function startRecognition({ clear }) {
-      const r = ensureRecognition();
-      if (!r) {
-        setStatus("Speech recognition not supported in this browser.");
-        return;
+    lastFinalCanonTokens = newTokens;
+  }
+
+  function ensureRecognition() {
+    if (!SpeechRecognition) return null;
+    if (recog) return recog;
+
+    recog = new SpeechRecognition();
+    recog.lang = langEl.value;
+
+    // ⚠️ plus stable sur Android
+    recog.continuous = false;
+    recog.interimResults = true;
+
+    recog.onresult = (event) => {
+      if (recState !== "listening") return;
+
+      const now = Date.now();
+
+      // 🔥 Ignore les premiers ms après resume
+      if (ignoreFirstResult && now - justResumedAt < 300) return;
+      ignoreFirstResult = false;
+
+      let interim = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        const t = r[0]?.transcript ?? "";
+        if (!t) continue;
+
+        if (r.isFinal) appendDeltaFromFinal(t);
+        else interim += t;
       }
-      lastFinalText = "";
 
-      r.lang = langEl.value;
-
-      if (clear) {
-        committedText = "";
-        interimText = "";
-        lastFinalCanonTokens = [];
-        segmentStart = 0;
-        renderTranscript();
-      } else {
-        // If user edited manually, sync once
-        // ✅ Always commit what's currently in the textarea (preserves edits even after leaving edit mode)
-
-
-        // Ensure separation before new words after resume
-        if (committedText && !/\s$/.test(committedText)) {
-          committedText += " ";
-          renderTranscript();
-        }
-
-        // New segment boundary (allows repeats like "...ça va" then "Ça va bien")
-        segmentStart = committedText.length;
-        lastFinalCanonTokens = [];
-      }
-
-      // Re-enable autoscroll following on Start/Resume
-      userPinnedToBottom = true;
-
-      recState = "listening";
-      manualEnd = false;
-      setStatus("Listening…");
-      try { r.start(); } catch (_) {}
-    }
-
-    function pauseRecognition() {
-      if (!recog) return;
-    
-      manualEnd = true;
-    
-      recState = "idle";   // <- déplacer AVANT stop()
-    
-      try { recog.stop(); } catch (_) {}
-    
-      interimText = "";
-      lastFinalCanonTokens = [];
-    
+      interimText = interim;
       renderTranscript();
-      setStatus("Paused.");
-    }
+    };
 
-    function stopRecognitionAndClear() {
-      if (recog) {
-        manualEnd = true;
-        try { recog.stop(); } catch (_) {}
+    recog.onend = () => {
+      if (recState === "listening" && !manualEnd) {
+        setTimeout(() => {
+          try { recog.start(); } catch (_) {}
+        }, 120);
       }
-      recState = "idle";
+      manualEnd = false;
+    };
+
+    recog.onerror = (e) => {
+      setStatus("Error: " + e.error);
+    };
+
+    return recog;
+  }
+
+  function startRecognition({ clear }) {
+    const r = ensureRecognition();
+    if (!r) return;
+
+    r.lang = langEl.value;
+
+    if (clear) {
       committedText = "";
       interimText = "";
       lastFinalCanonTokens = [];
-      segmentStart = 0;
       renderTranscript();
-      setStatus("⋆.˚ ☾⭒.˚");
-      shouldClearOnNextStart = true;
-      userPinnedToBottom = true;
+    } else {
+      if (committedText && !/\s$/.test(committedText)) {
+        committedText += " ";
+      }
     }
 
-    // ---------- Speech Synthesis ----------
-    let currentUtterance = null;
+    lastFinalCanonTokens = [];
 
-    function getSelectedOrAllText() {
-      const start = textEl.selectionStart;
-      const end = textEl.selectionEnd;
-      if (typeof start === "number" && typeof end === "number" && end > start) {
-        return textEl.value.slice(start, end);
-      }
-      return textEl.value;
-    }
+    // 🔥 protection premier mot
+    ignoreFirstResult = true;
+    justResumedAt = Date.now();
 
-    function speakText(text) {
-      if (!text.trim()) return;
+    recState = "listening";
+    manualEnd = false;
 
-      window.speechSynthesis.cancel();
+    setStatus("Listening…");
 
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = langEl.value;
-
-      u.onend = () => {
-        currentUtterance = null;
-        playBtn.textContent = "PLAY";
-        setStatus(recState === "listening" ? "Listening.." : "ᓚᘏᗢ");
-      };
-      u.onerror = () => {
-        currentUtterance = null;
-        playBtn.textContent = "PLAY";
-        setStatus("TTS error.");
-      };
-
-      currentUtterance = u;
-      playBtn.textContent = "STOP";
-      setStatus("Speaking…");
-      window.speechSynthesis.speak(u);
-    }
-
-    // ---------- Buttons ----------
-    startBtn.onclick = async () => {
-      const clear = shouldClearOnNextStart;
-      shouldClearOnNextStart = false;
-    
-      if (!textEl.readOnly) {
-        await commitTextareaToCommitted();
-      }
-      startRecognition({ clear });
-    };
-
-
-
-    stopBtn.onclick = () => {
-      stopRecognitionAndClear();
-      window.speechSynthesis.cancel();
-      currentUtterance = null;
-      playBtn.textContent = "PLAY";
-    };
-
-    pauseBtn.onclick = () => {
-      if (recState === "listening") pauseRecognition();
-
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        setStatus("Paused.");
-      } else if (recState !== "listening") {
-        setStatus("Paused.");
-      }
-    };
-
-resumeBtn.onclick = async () => {
-  if (!textEl.readOnly) {
-    await commitTextareaToCommitted();
+    try { r.start(); } catch (_) {}
   }
-  if (recState !== "listening") startRecognition({ clear: false });
 
-  if (window.speechSynthesis.paused) {
-    window.speechSynthesis.resume();
-    setStatus("Speaking…");
+  function pauseRecognition() {
+    if (!recog) return;
+
+    manualEnd = true;
+    recState = "idle";
+
+    try { recog.stop(); } catch (_) {}
+
+    interimText = "";
+    renderTranscript();
+
+    setStatus("Paused.");
   }
-};
 
+  function stopRecognition() {
+    if (recog) {
+      manualEnd = true;
+      try { recog.stop(); } catch (_) {}
+    }
 
+    recState = "idle";
+    committedText = "";
+    interimText = "";
+    lastFinalCanonTokens = [];
 
-    playBtn.onclick = () => {
-      if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
-        window.speechSynthesis.cancel();
-        currentUtterance = null;
-        playBtn.textContent = "PLAY";
-        setStatus(recState === "listening" ? "Listening…" : "ᓚᘏᗢ");
-        return;
-      }
-      speakText(getSelectedOrAllText());
-    };
+    renderTranscript();
+    setStatus("Stopped.");
+  }
 
-    // ---------- Edit toggle ----------
-    let editing = false;
-    editToggle.onclick = async () => {
-      editing = !editing;
-    
-      if (editing) {
-        if (recState === "listening") pauseRecognition();
-    
-        textEl.readOnly = false;
-        editState.textContent = "ON";
-    
-        // iOS fix: attendre 1 frame avant focus
-        requestAnimationFrame(() => {
-          textEl.focus();
-          textEl.setSelectionRange(textEl.value.length, textEl.value.length);
-        });
-    
-      } else {
-        textEl.blur();
-        await commitTextareaToCommitted();
-        textEl.readOnly = true;
-        editState.textContent = "OFF";
-      }
-    
-      updateEmptyState();
-    };
+  startBtn.onclick = () => {
+    startRecognition({ clear: true });
+  };
 
+  resumeBtn.onclick = () => {
+    setTimeout(() => {
+      startRecognition({ clear: false });
+    }, 120);
+  };
 
-    // ---------- Init ----------
-    setStatus("ᓚᘏᗢ");
-    updateEmptyState();
-  })();
-  </script>
+  pauseBtn.onclick = pauseRecognition;
+  stopBtn.onclick = stopRecognition;
+
+})();
+</script>
 </body>
 </html>
