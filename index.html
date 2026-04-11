@@ -322,7 +322,8 @@ textarea::-webkit-spellcheck-marker {
   const resumeBtn = document.getElementById('resumeBtn');
   const statusEl = document.getElementById('status');
   const textEl = document.getElementById('text');
-
+  const emptyStateEl = document.getElementById('emptyState');
+  
   let committedText = "";
   let interimText = "";
   let hasStarted = false;
@@ -386,6 +387,7 @@ textarea::-webkit-spellcheck-marker {
 
   function renderTranscript() {
     textEl.value = (committedText + interimText).trimStart();
+    updateEmptyState(); // ✅ AJOUT IMPORTANT
   }
 
   function appendDeltaFromFinal(finalTextRaw) {
