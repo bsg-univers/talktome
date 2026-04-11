@@ -314,6 +314,7 @@ textarea::-webkit-spellcheck-marker {
 
 <script>
 (() => {
+  // ---------- UI ----------
   const langEl = document.getElementById('lang');
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
@@ -322,284 +323,200 @@ textarea::-webkit-spellcheck-marker {
   const resumeBtn = document.getElementById('resumeBtn');
   const statusEl = document.getElementById('status');
   const textEl = document.getElementById('text');
-  const emptyStateEl = document.getElementById('emptyState');
-  
+  const editToggle = document.getElementById('editToggle');
+  const editState = document.getElementById('editState');
+  const emptyStateEl = document.getElementById("emptyState");
+
+  let isComposing = false;
+
+  textEl.addEventListener("compositionstart", () => { isComposing = true; });
+  textEl.addEventListener("compositionend", () => { isComposing = false; });
+
   let committedText = "";
   let interimText = "";
-  let hasStarted = false;
 
+  let recog = null;
   let recState = "idle";
   let manualEnd = false;
 
-  let lastFinalCanonTokens = [];
+  let lastFinalText = "";          // 🔥 FIX duplicate detection stronger
+  let restartCooldown = false;     // 🔥 FIX first-word loss
 
-  let ignoreFirstResult = false;
-  let justResumedAt = 0;
+  function setStatus(m){ statusEl.textContent = m; }
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recog = null;
-
-  function updateEmptyState() {
-  const hasText = normalize(textEl.value).length > 0;
-
-  const show = !hasStarted && !hasText && textEl.readOnly;
-
-  emptyStateEl.style.display = show ? "flex" : "none";
+  function normalize(s){
+    return (s || "")
+      .replace(/\s+/g,' ')
+      .replace(/[’]/g,"'") // unify apostrophes
+      .trim();
   }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
-
-  function normalize(s) {
-    return (s || "").replace(/\s+/g, " ").trim();
+  function render(){
+    textEl.value = (committedText + interimText).trimStart();
+    updateEmptyState();
   }
 
-  function rawTokens(s) {
-    return (s || "").trim().split(/\s+/).filter(Boolean);
+  function updateEmptyState(){
+    const hasText = normalize(textEl.value).length > 0;
+    emptyStateEl.style.display = (!hasText && textEl.readOnly) ? "flex" : "none";
   }
 
-  function canonToken(t) {
-    return (t || "")
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
+  // ---------- TOKEN HELPERS ----------
+  function canon(s){
+    return normalize(s)
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, "");
+      .replace(/[^\p{L}\p{N}\s']/gu,'')
+      .split(/\s+/)
+      .filter(Boolean);
   }
 
-  function canonTokensFromText(s) {
-    return rawTokens(s).map(canonToken).filter(Boolean);
-  }
-
-  function overlapTokenCount(full, next) {
-    const max = Math.min(full.length, next.length);
-    for (let k = max; k > 0; k--) {
-      let ok = true;
-      for (let i = 0; i < k; i++) {
-        if (full[full.length - k + i] !== next[i]) { ok = false; break; }
+  function overlap(a,b){
+    const max = Math.min(a.length,b.length);
+    for(let k=max;k>0;k--){
+      let ok=true;
+      for(let i=0;i<k;i++){
+        if(a[a.length-k+i]!==b[i]){ok=false;break;}
       }
-      if (ok) return k;
+      if(ok) return k;
     }
     return 0;
   }
 
-  function ensureSpace(base) {
-    return base.length > 0 && !/\s$/.test(base) ? " " : "";
-  }
+  function appendFinal(raw){
+    const t = normalize(raw);
+    if(!t) return;
 
-  function renderTranscript() {
-    textEl.value = (committedText + interimText).trimStart();
-    updateEmptyState(); // ✅ AJOUT IMPORTANT
-  }
+    // 🔥 HARD FIX: prevent duplicate emission
+    if(t === lastFinalText) return;
 
-  function appendDeltaFromFinal(finalTextRaw) {
-    const finalText = normalize(finalTextRaw);
-    if (!finalText) return;
+    const prev = canon(lastFinalText);
+    const next = canon(t);
 
-    const newTokens = canonTokensFromText(finalText);
-    const prevTokens = lastFinalCanonTokens;
+    const shared = overlap(prev,next);
 
-    const overlap = overlapTokenCount(prevTokens, newTokens);
-    const deltaTokens = newTokens.slice(overlap);
+    let addition = t;
 
-    if (deltaTokens.length > 0) {
-      const deltaText = rawTokens(finalText).slice(overlap).join(" ");
-      committedText += ensureSpace(committedText) + deltaText;
+    if(shared > 0){
+      addition = next.slice(shared).join(" ");
     }
 
-    lastFinalCanonTokens = newTokens;
+    // avoid empty append
+    if(addition.trim()){
+      committedText += (committedText ? " " : "") + addition;
+    }
+
+    lastFinalText = t;
   }
 
-  function ensureRecognition() {
-    if (!SpeechRecognition) return null;
-    if (recog) return recog;
+  // ---------- SPEECH API ----------
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function ensureRec(){
+    if(recog) return recog;
 
     recog = new SpeechRecognition();
     recog.lang = langEl.value;
-
-    // ⚠️ plus stable sur Android
-    recog.continuous = false;
+    recog.continuous = true;
     recog.interimResults = true;
 
-    recog.onresult = (event) => {
-      if (recState !== "listening") return;
-
-      const now = Date.now();
-
-      // 🔥 Ignore les premiers ms après resume
-      if (ignoreFirstResult && now - justResumedAt < 300) return;
-      ignoreFirstResult = false;
+    recog.onresult = (e) => {
+      if(recState !== "listening") return;
 
       let interim = "";
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const r = event.results[i];
-        const t = r[0]?.transcript ?? "";
-        if (!t) continue;
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const r = e.results[i];
+        const t = r[0]?.transcript || "";
 
-        if (r.isFinal) appendDeltaFromFinal(t);
-        else interim += t;
+        if(r.isFinal){
+          appendFinal(t);
+        } else {
+          interim += t;
+        }
       }
 
       interimText = interim;
-      renderTranscript();
+      render();
     };
 
     recog.onend = () => {
-      if (recState === "listening" && !manualEnd) {
+      // 🔥 FIX: avoid immediate restart glitch (first-word loss)
+      if(recState === "listening" && !manualEnd){
         setTimeout(() => {
-          try { recog.start(); } catch (_) {}
-        }, 120);
+          try {
+            restartCooldown = true;
+            recog.start();
+            setTimeout(()=> restartCooldown=false, 200);
+          } catch(e){}
+        }, 250);
       }
       manualEnd = false;
     };
 
-    recog.onerror = (e) => {
-      setStatus("Error: " + e.error);
-    };
+    recog.onerror = (e) => setStatus("Error: " + e.error);
 
     return recog;
   }
 
-  function startRecognition({ clear }) {
-    const r = ensureRecognition();
-    if (!r) return;
+  function start(clear){
+    const r = ensureRec();
 
-    r.lang = langEl.value;
-
-    if (clear) {
+    if(clear){
       committedText = "";
       interimText = "";
-      lastFinalCanonTokens = [];
-      renderTranscript();
-    } else {
-      if (committedText && !/\s$/.test(committedText)) {
-        committedText += " ";
-      }
+      lastFinalText = "";
     }
 
-    lastFinalCanonTokens = [];
-
-    // 🔥 protection premier mot
-    ignoreFirstResult = true;
-    justResumedAt = Date.now();
+    // 🔥 FIX: warm-up trick (prevents first word loss)
+    try{
+      r.start();
+      setTimeout(()=>{ try{ r.stop(); }catch(e){} }, 120);
+      setTimeout(()=>{ try{ r.start(); }catch(e){} }, 300);
+    }catch(e){}
 
     recState = "listening";
     manualEnd = false;
-
-    setStatus("Listening…");
-
-    try { r.start(); } catch (_) {}
+    setStatus("Listening...");
   }
 
-  function pauseRecognition() {
-    if (!recog) return;
-  
+  function pause(){
+    if(!recog) return;
     manualEnd = true;
     recState = "idle";
-  
-    // 🔥 IMPORTANT: sauver l'interim avant stop
-    if (interimText.trim()) {
-      committedText += ensureSpace(committedText) + normalize(interimText);
-      interimText = "";
-    }
-  
-    try { recog.stop(); } catch (_) {}
-  
-    renderTranscript();
-  
-    setStatus("Paused.");
+    try{ recog.stop(); }catch(e){}
+
+    interimText = "";
+    render();
+    setStatus("Paused");
   }
 
-  function stopRecognition() {
-    if (recog) {
+  function stop(){
+    if(recog){
       manualEnd = true;
-      try { recog.stop(); } catch (_) {}
+      try{ recog.stop(); }catch(e){}
     }
 
     recState = "idle";
     committedText = "";
     interimText = "";
-    lastFinalCanonTokens = [];
+    lastFinalText = "";
 
-    renderTranscript();
-    setStatus("⋆.˚ ☾⭒.˚");
+    render();
+    setStatus("Idle");
   }
 
-  startBtn.onclick = () => {
-    hasStarted = true;
-    updateEmptyState();
-    startRecognition({ clear: true });
-  };
+  // ---------- BUTTONS ----------
+  startBtn.onclick = () => start(true);
+  stopBtn.onclick = () => stop();
+  pauseBtn.onclick = () => pause();
 
   resumeBtn.onclick = () => {
-    hasStarted = true;
-    updateEmptyState();
-  
-    // 🔥 Si on est en mode édition → forcer OFF
-    if (!textEl.readOnly) {
-      textEl.blur();
-  
-      committedText = textEl.value;
-      interimText = "";
-      lastFinalCanonTokens = [];
-  
-      textEl.readOnly = true;
-      editState.textContent = "OFF";
-    }
-  
-    setTimeout(() => {
-      startRecognition({ clear: false });
-    }, 120);
+    start(false);
   };
 
-  pauseBtn.onclick = () => {
-    hasStarted = true;
-    updateEmptyState();
-    pauseRecognition();
-  };
-  stopBtn.onclick = () => {
-    hasStarted = false; // 🔥 reset uniquement ici
-  
-    stopRecognition();
-    updateEmptyState();
-  };
+  setStatus("Ready");
+  render();
 
-  // ---------- Edit toggle ----------
-const editToggle = document.getElementById('editToggle');
-const editState = document.getElementById('editState');
-
-let editing = false;
-
-editToggle.onclick = async () => {
-  editing = !editing;
-
-  if (editing) {
-    // 🔥 stop dictée si active
-    if (recState === "listening") {
-      pauseRecognition();
-    }
-
-    textEl.readOnly = false;
-    editState.textContent = "ON";
-
-    requestAnimationFrame(() => {
-      textEl.focus();
-      textEl.setSelectionRange(textEl.value.length, textEl.value.length);
-    });
-
-  } else {
-    textEl.blur();
-
-    // 🔥 synchroniser texte édité
-    committedText = textEl.value;
-    interimText = "";
-    lastFinalCanonTokens = [];
-
-    textEl.readOnly = true;
-    editState.textContent = "OFF";
-  }
-
-  updateEmptyState(); // 🔥 important pour ton micro
-};
 })();
 </script>
 </body>
