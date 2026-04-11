@@ -521,7 +521,7 @@ textarea::-webkit-spellcheck-marker {
     lastFinalCanonTokens = [];
 
     renderTranscript();
-    setStatus("Stopped.");
+    setStatus("⋆.˚ ☾⭒.˚");
   }
 
   startBtn.onclick = () => {
@@ -551,6 +551,43 @@ textarea::-webkit-spellcheck-marker {
     updateEmptyState();
   };
 
+  // ---------- Edit toggle ----------
+const editToggle = document.getElementById('editToggle');
+const editState = document.getElementById('editState');
+
+let editing = false;
+
+editToggle.onclick = async () => {
+  editing = !editing;
+
+  if (editing) {
+    // 🔥 stop dictée si active
+    if (recState === "listening") {
+      pauseRecognition();
+    }
+
+    textEl.readOnly = false;
+    editState.textContent = "ON";
+
+    requestAnimationFrame(() => {
+      textEl.focus();
+      textEl.setSelectionRange(textEl.value.length, textEl.value.length);
+    });
+
+  } else {
+    textEl.blur();
+
+    // 🔥 synchroniser texte édité
+    committedText = textEl.value;
+    interimText = "";
+    lastFinalCanonTokens = [];
+
+    textEl.readOnly = true;
+    editState.textContent = "OFF";
+  }
+
+  updateEmptyState(); // 🔥 important pour ton micro
+};
 })();
 </script>
 </body>
