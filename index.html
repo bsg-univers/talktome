@@ -325,6 +325,7 @@ textarea::-webkit-spellcheck-marker {
 
   let committedText = "";
   let interimText = "";
+  let hasStarted = false;
 
   let recState = "idle";
   let manualEnd = false;
@@ -336,6 +337,14 @@ textarea::-webkit-spellcheck-marker {
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recog = null;
+
+  function updateEmptyState() {
+  const hasText = normalize(textEl.value).length > 0;
+
+  const show = !hasStarted && !hasText && textEl.readOnly;
+
+  emptyStateEl.style.display = show ? "flex" : "none";
+  }
 
   function setStatus(msg) { statusEl.textContent = msg; }
 
@@ -481,15 +490,20 @@ textarea::-webkit-spellcheck-marker {
 
   function pauseRecognition() {
     if (!recog) return;
-
+  
     manualEnd = true;
     recState = "idle";
-
+  
+    // 🔥 IMPORTANT: sauver l'interim avant stop
+    if (interimText.trim()) {
+      committedText += ensureSpace(committedText) + normalize(interimText);
+      interimText = "";
+    }
+  
     try { recog.stop(); } catch (_) {}
-
-    interimText = "";
+  
     renderTranscript();
-
+  
     setStatus("Paused.");
   }
 
@@ -509,17 +523,31 @@ textarea::-webkit-spellcheck-marker {
   }
 
   startBtn.onclick = () => {
+    hasStarted = true;
+    updateEmptyState();
     startRecognition({ clear: true });
   };
 
   resumeBtn.onclick = () => {
+    hasStarted = true;
+    updateEmptyState();
+  
     setTimeout(() => {
       startRecognition({ clear: false });
     }, 120);
   };
 
-  pauseBtn.onclick = pauseRecognition;
-  stopBtn.onclick = stopRecognition;
+  pauseBtn.onclick = () => {
+    hasStarted = true;
+    updateEmptyState();
+    pauseRecognition();
+  };
+  stopBtn.onclick = () => {
+    hasStarted = false; // 🔥 reset uniquement ici
+  
+    stopRecognition();
+    updateEmptyState();
+  };
 
 })();
 </script>
