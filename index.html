@@ -569,14 +569,23 @@ textarea::-webkit-spellcheck-marker {
       }
     };
 
-    resumeBtn.onclick = async () => {
-      if (!textEl.readOnly) await commitTextareaToCommitted();
-      if (recState !== "listening") startRecognition({ clear: false });
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-        setStatus("Speaking...");
-      }
-    };
+    // Remplacez votre bloc resumeBtn.onclick par celui-ci :
+      resumeBtn.onclick = async () => {
+        // 1. Si on était en train d'éditer, on enregistre les modifs manuelles
+        if (!textEl.readOnly) await commitTextareaToCommitted();
+        
+        // 2. Si la synthèse vocale était en pause, on la reprend
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          setStatus("Speaking...");
+        }
+      
+        // 3. RECONNAISSANCE VOCALE : 
+        // On force 'clear: false' de manière EXPLICITE ici
+        if (recState !== "listening") {
+          startRecognition({ clear: false }); 
+        }
+      };
 
     playBtn.onclick = () => {
       if (window.speechSynthesis.speaking) {
