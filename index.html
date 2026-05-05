@@ -336,6 +336,11 @@ textarea::-webkit-spellcheck-marker {
     let manualEnd = false;
     let userPinnedToBottom = true;
 
+    // Force le chargement des voix dès le chargement de la page
+window.speechSynthesis.onvoiceschanged = () => {
+  console.log("Voix chargées :", window.speechSynthesis.getVoices().length);
+};
+    
     textEl.addEventListener("compositionstart", () => { isComposing = true; });
     textEl.addEventListener("compositionend", () => { isComposing = false; });
     
@@ -536,34 +541,32 @@ textarea::-webkit-spellcheck-marker {
     // ---------- TTS AMÉLIORÉ ----------
 function speakText(text) {
   if (!text.trim()) return;
-
-  // 1. On annule toute parole en cours proprement
   window.speechSynthesis.cancel();
-
-  // 2. Création de l'objet de synthèse
-  const u = new SpeechSynthesisUtterance(text);
   
-  // 3. Choix de la langue
+  const u = new SpeechSynthesisUtterance(text);
   u.lang = langEl.value;
 
-  // 4. Gestion des événements
-  u.onstart = () => {
-    playBtn.textContent = "STOP";
-    setStatus("Speaking...");
+  // Fonction pour définir la voix
+  const setVoice = () => {
+    const voices = window.speechSynthesis.getVoices();
+    // On cherche une voix qui correspond à la langue
+    const selectedVoice = voices.find(v => v.lang.startsWith(langEl.value)) || 
+                          voices.find(v => v.lang.startsWith(langEl.value.split('-')[0])) || 
+                          voices[0];
+    if (selectedVoice) u.voice = selectedVoice;
   };
 
-  u.onend = () => {
+  // Essayer immédiatement
+  setVoice();
+
+  u.onstart = () => { playBtn.textContent = "STOP"; setStatus("Speaking..."); };
+  u.onend = () => { playBtn.textContent = "PLAY"; setStatus("ᓚᘏᗢ"); };
+  u.onerror = (e) => { 
+    console.error("Speech Error:", e);
+    setStatus("Error."); 
     playBtn.textContent = "PLAY";
-    setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
   };
-
-  u.onerror = (e) => {
-    console.error("Erreur de synthèse:", e);
-    playBtn.textContent = "PLAY";
-    setStatus("Error.");
-  };
-
-  // 5. Lancement
+  
   window.speechSynthesis.speak(u);
 }
 
