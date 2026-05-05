@@ -533,19 +533,39 @@ textarea::-webkit-spellcheck-marker {
       return textEl.value;
     }
 
-    function speakText(text) {
-      if (!text.trim()) return;
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = langEl.value;
-      u.onend = () => {
-        playBtn.textContent = "PLAY";
-        setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
-      };
-      playBtn.textContent = "STOP";
-      setStatus("Speaking...");
-      window.speechSynthesis.speak(u);
-    }
+    // ---------- TTS AMÉLIORÉ ----------
+function speakText(text) {
+  if (!text.trim()) return;
+
+  // 1. On annule toute parole en cours proprement
+  window.speechSynthesis.cancel();
+
+  // 2. Création de l'objet de synthèse
+  const u = new SpeechSynthesisUtterance(text);
+  
+  // 3. Choix de la langue
+  u.lang = langEl.value;
+
+  // 4. Gestion des événements
+  u.onstart = () => {
+    playBtn.textContent = "STOP";
+    setStatus("Speaking...");
+  };
+
+  u.onend = () => {
+    playBtn.textContent = "PLAY";
+    setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
+  };
+
+  u.onerror = (e) => {
+    console.error("Erreur de synthèse:", e);
+    playBtn.textContent = "PLAY";
+    setStatus("Error.");
+  };
+
+  // 5. Lancement
+  window.speechSynthesis.speak(u);
+}
 
     // ---------- Events ----------
     startBtn.onclick = async () => {
