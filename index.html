@@ -335,11 +335,6 @@ textarea::-webkit-spellcheck-marker {
     let shouldClearOnNextStart = true;
     let manualEnd = false;
     let userPinnedToBottom = true;
-
-    // Force le chargement des voix dès le chargement de la page
-window.speechSynthesis.onvoiceschanged = () => {
-  console.log("Voix chargées :", window.speechSynthesis.getVoices().length);
-};
     
     textEl.addEventListener("compositionstart", () => { isComposing = true; });
     textEl.addEventListener("compositionend", () => { isComposing = false; });
@@ -539,36 +534,31 @@ window.speechSynthesis.onvoiceschanged = () => {
     }
 
     // ---------- TTS AMÉLIORÉ ----------
-function speakText(text) {
-  if (!text.trim()) return;
-  window.speechSynthesis.cancel();
-  
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = langEl.value;
+ function speakText(text) {
 
-  // Fonction pour définir la voix
-  const setVoice = () => {
-    const voices = window.speechSynthesis.getVoices();
-    // On cherche une voix qui correspond à la langue
-    const selectedVoice = voices.find(v => v.lang.startsWith(langEl.value)) || 
-                          voices.find(v => v.lang.startsWith(langEl.value.split('-')[0])) || 
-                          voices[0];
-    if (selectedVoice) u.voice = selectedVoice;
-  };
+      if (!text.trim()) return;
 
-  // Essayer immédiatement
-  setVoice();
+      window.speechSynthesis.cancel();
 
-  u.onstart = () => { playBtn.textContent = "STOP"; setStatus("Speaking..."); };
-  u.onend = () => { playBtn.textContent = "PLAY"; setStatus("ᓚᘏᗢ"); };
-  u.onerror = (e) => { 
-    console.error("Speech Error:", e);
-    setStatus("Error."); 
-    playBtn.textContent = "PLAY";
-  };
-  
-  window.speechSynthesis.speak(u);
-}
+      const u = new SpeechSynthesisUtterance(text);
+
+      u.lang = langEl.value;
+
+      u.onend = () => {
+
+        playBtn.textContent = "PLAY";
+
+        setStatus(recState === "listening" ? "Listening..." : "ᓚᘏᗢ");
+
+      };
+
+      playBtn.textContent = "STOP";
+
+      setStatus("Speaking...");
+
+      window.speechSynthesis.speak(u);
+
+    } 
 
     // ---------- Events ----------
     startBtn.onclick = async () => {
